@@ -1,5 +1,5 @@
 import 'dart:math';
-
+import 'screens/chat_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -12,15 +12,15 @@ void main() {
 class MeshMessengerApp extends StatelessWidget {
   const MeshMessengerApp({super.key});
 
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Mesh Messenger Test',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark(useMaterial3: true),
-      home: const MeshHomeScreen(),
-    );
-  }
+ @override
+Widget build(BuildContext context) {
+  return MaterialApp(
+    title: 'Mesh Messenger Test',
+    debugShowCheckedModeBanner: false,
+    theme: ThemeData.dark(useMaterial3: true),
+    home: const ChatScreen(),
+  );
+}
 }
 
 class MeshHomeScreen extends StatefulWidget {
