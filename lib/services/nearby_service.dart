@@ -68,6 +68,10 @@ final Map<String, String> knownDevices = {};
     deviceName = name.trim();
 
     await prefs.setString('mesh_device_name', deviceName);
+    if (deviceId.isNotEmpty && deviceName.isNotEmpty) {
+  knownDevices[deviceId] = deviceName;
+  onDevicesChanged?.call();
+}
   }
 
   Future<void> requestPermissions() async {

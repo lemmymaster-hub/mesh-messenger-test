@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:typed_data';
+import 'dart:convert';
 
 void main() {
   runApp(const MeshMessengerApp());
@@ -42,6 +43,7 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
   final List<String> logs = [];
   final Map<String, String> foundDevices = {};
   final Map<String, String> connectedDevices = {};
+  final Set<String> seenMessages = {};
 
   @override
   void initState() {
@@ -55,7 +57,15 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
       logs.insert(0, '${DateTime.now().toString().substring(11, 19)}  $text');
     });
   }
-
+Map<String, dynamic> createMessage(String text) {
+  return {
+    'messageId': DateTime.now().millisecondsSinceEpoch.toString(),
+    'sender': deviceName,
+    'text': text,
+    'hopCount': 0,
+    'timestamp': DateTime.now().toIso8601String(),
+  };
+}
   Future<void> requestPermissions() async {
     await [
       Permission.location,
@@ -205,7 +215,10 @@ class _MeshHomeScreenState extends State<MeshHomeScreen> {
     }
 
     for (final endpointId in connectedDevices.keys) {
-      final message = 'Pozdrav sa $deviceName';
+      final messageData = createMessage('Pozdrav sa $deviceName');
+final message = jsonEncode(messageData);
+
+seenMessages.add(messageData['messageId']);
       await Nearby().sendBytesPayload(
         endpointId,
         Uint8List.fromList(message.codeUnits),
