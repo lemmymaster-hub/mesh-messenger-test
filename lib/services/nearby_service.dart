@@ -32,6 +32,27 @@ final Map<String, String> knownDevices = {};
 
   NearbyService();
 
+Future<void> connectToDevice(String endpointId) async {
+  if (deviceName.isEmpty) {
+    onLog?.call('Prvo unesi ime uređaja.');
+    return;
+  }
+
+  try {
+    await Nearby().requestConnection(
+      deviceName,
+      endpointId,
+      onConnectionInitiated: _onConnectionInitiated,
+      onConnectionResult: _onConnectionResult,
+      onDisconnected: _onDisconnected,
+    );
+
+    onLog?.call('Zahtjev za povezivanje poslat: ${foundDevices[endpointId] ?? endpointId}');
+  } catch (e) {
+    onLog?.call('Greška povezivanja: $e');
+  }
+}
+
   Future<String?> loadDeviceName() async {
     final prefs = await SharedPreferences.getInstance();
 
@@ -126,19 +147,12 @@ final Map<String, String> knownDevices = {};
         deviceName,
         strategy,
         serviceId: serviceId,
-        onEndpointFound: (String id, String name, String serviceId) {
-          foundDevices[id] = name;
-          onLog?.call('Pronađen uređaj: $name');
-          onDevicesChanged?.call();
+       onEndpointFound: (String id, String name, String serviceId) {
+  foundDevices[id] = name;
 
-          Nearby().requestConnection(
-            deviceName,
-            id,
-            onConnectionInitiated: _onConnectionInitiated,
-            onConnectionResult: _onConnectionResult,
-            onDisconnected: _onDisconnected,
-          );
-        },
+  onLog?.call('Pronađen uređaj: $name');
+  onDevicesChanged?.call();
+},
         onEndpointLost: (String? id) {
           if (id != null) {
             foundDevices.remove(id);
@@ -260,14 +274,20 @@ if (meshMessage.senderName.isNotEmpty) {
     }
   }
 
-  void _onConnectionResult(String id, Status status) {
-    onLog?.call('Rezultat konekcije $id: $status');
+ void _onConnectionResult(String id, Status status) {
+  onLog?.call('Rezultat konekcije $id: $status');
 
-    if (status == Status.CONNECTED) {
-      connectedDevices[id] = foundDevices[id] ?? id;
-      onDevicesChanged?.call();
-    }
+  if (status == Status.CONNECTED) {
+    final name = foundDevices[id] ?? connectedDevices[id] ?? id;
+
+    connectedDevices.removeWhere((key, value) => value == name);
+    connectedDevices[id] = name;
+
+    foundDevices.remove(id);
+
+    onDevicesChanged?.call();
   }
+}
 
   void _onDisconnected(String id) {
     connectedDevices.remove(id);

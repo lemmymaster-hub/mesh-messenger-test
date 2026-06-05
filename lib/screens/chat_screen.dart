@@ -19,14 +19,19 @@ class _ChatScreenState extends State<ChatScreen> {
 
   final List<ChatMessage> _messages = [];
   final List<String> _logs = [];
+  final List<ChatMessage> _privateMessages = [];
 
   bool showNameEditor = false;
+
+  String? selectedPrivateDeviceId;
+  String? selectedPrivateDeviceName;
+  String? selectedPrivateEndpointId;
 
   Widget _deviceChip(String name, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: color),
       ),
@@ -38,6 +43,47 @@ class _ChatScreenState extends State<ChatScreen> {
           fontWeight: FontWeight.bold,
         ),
       ),
+    );
+  }
+
+  void _showConnectedDeviceOptions(String endpointId, String name) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF151A23),
+      builder: (context) {
+        return SafeArea(
+          child: Wrap(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.message, color: Colors.greenAccent),
+                title: Text(
+                  'Pošalji privatnu poruku: $name',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  setState(() {
+                    selectedPrivateEndpointId = endpointId;
+                    selectedPrivateDeviceName = name;
+                    selectedPrivateDeviceId = null;
+                    _privateMessages.clear();
+                  });
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.link_off, color: Colors.redAccent),
+                title: Text(
+                  'Diskonektuj se od: $name',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                },
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -61,6 +107,10 @@ class _ChatScreenState extends State<ChatScreen> {
         _addSystemMessage('Uređaj: ${nearbyService.deviceName}');
         _addSystemMessage('ID: ${nearbyService.deviceId.substring(0, 8)}');
         _addSystemMessage('Mesh chat spreman.');
+
+        await nearbyService.startAdvertising();
+        await Future.delayed(const Duration(seconds: 1));
+        await nearbyService.startDiscovery();
       }
 
       setState(() {});
@@ -126,15 +176,28 @@ class _ChatScreenState extends State<ChatScreen> {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
 
+    final isPrivateMode = selectedPrivateDeviceName != null;
+
     setState(() {
-      _messages.add(
-        ChatMessage(
-          text: text,
-          isMe: true,
-          time: DateTime.now(),
-          senderName: 'Ja',
-        ),
-      );
+      if (isPrivateMode) {
+        _privateMessages.add(
+          ChatMessage(
+            text: text,
+            isMe: true,
+            time: DateTime.now(),
+            senderName: 'Ja',
+          ),
+        );
+      } else {
+        _messages.add(
+          ChatMessage(
+            text: text,
+            isMe: true,
+            time: DateTime.now(),
+            senderName: 'Ja',
+          ),
+        );
+      }
     });
 
     _controller.clear();
@@ -172,8 +235,9 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final connectedCount = nearbyService.connectedDevices.length;
-    final deviceName =
-        nearbyService.deviceName.isEmpty ? 'Nije podešeno' : nearbyService.deviceName;
+    final deviceName = nearbyService.deviceName.isEmpty
+        ? 'Nije podešeno'
+        : nearbyService.deviceName;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0E1117),
@@ -189,7 +253,7 @@ class _ChatScreenState extends State<ChatScreen> {
             Text(
               '$deviceName | Povezano: $connectedCount',
               style: TextStyle(
-                color: Colors.white.withOpacity(0.65),
+                color: Colors.white.withValues(alpha: 0.65),
                 fontSize: 11,
               ),
             ),
@@ -247,7 +311,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       decoration: InputDecoration(
                         hintText: 'Unesi ime uređaja...',
                         hintStyle: TextStyle(
-                          color: Colors.white.withOpacity(0.5),
+                          color: Colors.white.withValues(alpha: 0.5),
                         ),
                         filled: true,
                         fillColor: const Color(0xFF0E1117),
@@ -266,11 +330,12 @@ class _ChatScreenState extends State<ChatScreen> {
                 ],
               ),
             ),
+
           if (connectedCount == 0)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(8),
-              color: Colors.orange.withOpacity(0.15),
+              color: Colors.orange.withValues(alpha: 0.15),
               child: const Text(
                 'Nema povezanih uređaja. Klikni Auto Connect na oba telefona.',
                 textAlign: TextAlign.center,
@@ -281,14 +346,16 @@ class _ChatScreenState extends State<ChatScreen> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(8),
-              color: Colors.green.withOpacity(0.15),
+              color: Colors.green.withValues(alpha: 0.15),
               child: Text(
                 'Povezano uređaja: $connectedCount',
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.greenAccent, fontSize: 12),
               ),
             ),
+
           if (nearbyService.connectedDevices.isNotEmpty ||
+              nearbyService.foundDevices.isNotEmpty ||
               nearbyService.knownDevices.isNotEmpty)
             Container(
               width: double.infinity,
@@ -312,11 +379,86 @@ class _ChatScreenState extends State<ChatScreen> {
                       runSpacing: 6,
                       children:
                           nearbyService.connectedDevices.entries.map((entry) {
-                        return _deviceChip(entry.value, Colors.greenAccent);
+                        return GestureDetector(
+                          onTap: () {
+                            _showConnectedDeviceOptions(
+                              entry.key,
+                              entry.value,
+                            );
+                          },
+                          child: _deviceChip(
+                            entry.value,
+                            Colors.greenAccent,
+                          ),
+                        );
                       }).toList(),
                     ),
                     const SizedBox(height: 10),
                   ],
+
+                  Builder(
+                    builder: (context) {
+                      final seenNames = <String>{};
+
+                      final notConnectedDevices =
+                          nearbyService.foundDevices.entries.where((entry) {
+                        final isConnectedById =
+                            nearbyService.connectedDevices.containsKey(entry.key);
+
+                        final isConnectedByName =
+                            nearbyService.connectedDevices.values.contains(
+                          entry.value,
+                        );
+
+                        final isDuplicateName = seenNames.contains(entry.value);
+
+                        if (!isConnectedById &&
+                            !isConnectedByName &&
+                            !isDuplicateName) {
+                          seenNames.add(entry.value);
+                          return true;
+                        }
+
+                        return false;
+                      }).toList();
+
+                      if (notConnectedDevices.isEmpty) {
+                        return const SizedBox.shrink();
+                      }
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Pronađeni, nisu povezani:',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            children: notConnectedDevices.map((entry) {
+                              return GestureDetector(
+                                onTap: () async {
+                                  await nearbyService.connectToDevice(entry.key);
+                                },
+                                child: _deviceChip(
+                                  entry.value,
+                                  Colors.amberAccent,
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                      );
+                    },
+                  ),
+
                   Builder(
                     builder: (context) {
                       final indirectDevices =
@@ -350,7 +492,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             children: indirectDevices.map((entry) {
                               return _deviceChip(
                                 entry.value,
-                                Colors.amberAccent,
+                                Colors.blueAccent,
                               );
                             }).toList(),
                           ),
@@ -361,6 +503,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 ],
               ),
             ),
+
           Expanded(
             child: ListView.builder(
               controller: _scrollController,
@@ -400,7 +543,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             child: Text(
                               msg.senderName!,
                               style: TextStyle(
-                                color: Colors.white.withOpacity(0.65),
+                                color: Colors.white.withValues(alpha: 0.65),
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -417,7 +560,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         Text(
                           _formatTime(msg.time),
                           style: TextStyle(
-                            color: Colors.white.withOpacity(0.65),
+                            color: Colors.white.withValues(alpha: 0.65),
                             fontSize: 11,
                           ),
                         ),
@@ -428,6 +571,7 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
           ),
+
           if (_logs.isNotEmpty)
             ExpansionTile(
               collapsedBackgroundColor: const Color(0xFF151A23),
@@ -442,13 +586,96 @@ class _ChatScreenState extends State<ChatScreen> {
                   title: Text(
                     log,
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.75),
+                      color: Colors.white.withValues(alpha: 0.75),
                       fontSize: 11,
                     ),
                   ),
                 );
               }).toList(),
             ),
+
+          if (selectedPrivateDeviceName != null)
+            Container(
+              height: 220,
+              width: double.infinity,
+              color: const Color(0xFF0B1220),
+              child: Column(
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    color: Colors.blue.withValues(alpha: 0.15),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Privatni chat: $selectedPrivateDeviceName',
+                            style: const TextStyle(
+                              color: Colors.blueAccent,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(
+                            Icons.close,
+                            color: Colors.blueAccent,
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              selectedPrivateDeviceName = null;
+                              selectedPrivateDeviceId = null;
+                              selectedPrivateEndpointId = null;
+                              _privateMessages.clear();
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.all(8),
+                      itemCount: _privateMessages.length,
+                      itemBuilder: (context, index) {
+                        final msg = _privateMessages[index];
+
+                        return Align(
+                          alignment: msg.isMe
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(vertical: 3),
+                            padding: const EdgeInsets.all(9),
+                            constraints: BoxConstraints(
+                              maxWidth:
+                                  MediaQuery.of(context).size.width * 0.72,
+                            ),
+                            decoration: BoxDecoration(
+                              color: msg.isMe
+                                  ? const Color(0xFF1D4ED8)
+                                  : const Color(0xFF1F2937),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              msg.text,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           Container(
             padding: const EdgeInsets.fromLTRB(10, 8, 10, 12),
             color: const Color(0xFF151A23),
@@ -459,9 +686,11 @@ class _ChatScreenState extends State<ChatScreen> {
                     controller: _controller,
                     style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
-                      hintText: 'Unesi mesh poruku...',
+                      hintText: selectedPrivateDeviceName == null
+                          ? 'Unesi mesh poruku...'
+                          : 'Privatna poruka za $selectedPrivateDeviceName...',
                       hintStyle: TextStyle(
-                        color: Colors.white.withOpacity(0.5),
+                        color: Colors.white.withValues(alpha: 0.5),
                       ),
                       filled: true,
                       fillColor: const Color(0xFF0E1117),
