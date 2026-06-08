@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../models/chat_message.dart';
 import '../services/nearby_service.dart';
@@ -26,7 +27,13 @@ class _ChatScreenState extends State<ChatScreen> {
   String? selectedPrivateDeviceId;
   String? selectedPrivateDeviceName;
   String? selectedPrivateEndpointId;
+bool sosActive = false;
 
+int sosSentCount = 0;
+int sosAcceptedCount = 0;
+int sosPendingCount = 0;
+
+String? activeSosId;
   Widget _deviceChip(String name, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -65,7 +72,9 @@ class _ChatScreenState extends State<ChatScreen> {
                   setState(() {
                     selectedPrivateEndpointId = endpointId;
                     selectedPrivateDeviceName = name;
-                    selectedPrivateDeviceId = null;
+                    selectedPrivateDeviceId =
+                        nearbyService.endpointDeviceIds[endpointId];
+
                     _privateMessages.clear();
                   });
                 },
@@ -123,18 +132,35 @@ class _ChatScreenState extends State<ChatScreen> {
       });
     };
 
-    nearbyService.onMessageReceived = (message, endpointId, senderName) {
+    nearbyService.onMessageReceived =
+        (message, endpointId, senderName, type) {
       if (!mounted) return;
 
       setState(() {
-        _messages.add(
-          ChatMessage(
-            text: message,
-            isMe: false,
-            time: DateTime.now(),
-            senderName: senderName,
-          ),
-        );
+        if (type == 'private') {
+          _privateMessages.add(
+            ChatMessage(
+              text: message,
+              isMe: false,
+              time: DateTime.now(),
+              senderName: senderName,
+            ),
+          );
+
+          selectedPrivateEndpointId = endpointId;
+          selectedPrivateDeviceName = senderName;
+          selectedPrivateDeviceId =
+              nearbyService.endpointDeviceIds[endpointId];
+        } else {
+          _messages.add(
+            ChatMessage(
+              text: message,
+              isMe: false,
+              time: DateTime.now(),
+              senderName: senderName,
+            ),
+          );
+        }
       });
 
       _scrollToBottom();
@@ -171,7 +197,59 @@ class _ChatScreenState extends State<ChatScreen> {
       _addSystemMessage('ID: ${nearbyService.deviceId.substring(0, 8)}');
     });
   }
+Future<void> _activateSos() async {
+  try {
+   
 
+    LocationPermission permission = await Geolocator.checkPermission();
+
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      _addSystemMessage('GPS dozvola nije odobrena. SOS nije poslat.');
+      setState(() {});
+      return;
+    }
+
+    final position = await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+    );
+
+    final connectedCount = nearbyService.connectedDevices.length;
+
+    setState(() {
+      sosActive = true;
+      sosSentCount = connectedCount;
+      sosAcceptedCount = 0;
+      sosPendingCount = connectedCount;
+      activeSosId = DateTime.now().millisecondsSinceEpoch.toString();
+
+      _messages.insert(
+        0,
+        ChatMessage(
+          text:
+              '🆘 SOS POSLAT\n'
+              'Lokacija: ${position.latitude}, ${position.longitude}\n'
+              'Vrijeme: ${DateTime.now().toLocal()}',
+          isMe: true,
+          time: DateTime.now(),
+          senderName: 'JA',
+        ),
+      );
+    });
+
+    await nearbyService.sendSosMessage(
+      latitude: position.latitude,
+      longitude: position.longitude,
+    );
+  } catch (e) {
+    _addSystemMessage('Greška pri slanju SOS: $e');
+    setState(() {});
+  }
+}
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
@@ -203,7 +281,14 @@ class _ChatScreenState extends State<ChatScreen> {
     _controller.clear();
     _scrollToBottom();
 
-    await nearbyService.sendMessage(text);
+    if (isPrivateMode && selectedPrivateDeviceId != null) {
+      await nearbyService.sendPrivateMessage(
+        text: text,
+        receiverDeviceId: selectedPrivateDeviceId!,
+      );
+    } else {
+      await nearbyService.sendMessage(text);
+    }
   }
 
   void _scrollToBottom() {
@@ -240,6 +325,7 @@ class _ChatScreenState extends State<ChatScreen> {
         : nearbyService.deviceName;
 
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       backgroundColor: const Color(0xFF0E1117),
       appBar: AppBar(
         backgroundColor: const Color(0xFF151A23),
@@ -330,7 +416,157 @@ class _ChatScreenState extends State<ChatScreen> {
                 ],
               ),
             ),
+Padding(
+  padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+  child: Row(
+    children: [
+      TweenAnimationBuilder<double>(
+  tween: Tween<double>(
+    begin: 1.0,
+    end: sosActive ? 1.10 : 1.0,
+  ),
+  duration: const Duration(milliseconds: 650),
+  curve: Curves.easeInOut,
+  builder: (context, scale, child) {
+    return Transform.scale(
+      scale: scale,
+      child: child,
+    );
+  },
+  onEnd: () {
+    if (sosActive && mounted) {
+      setState(() {});
+    }
+  },
+  child: GestureDetector(
+    onTap: _activateSos,
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 350),
+      width: 88,
+      height: 88,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFFFF5A5A),
+            Color(0xFFD90000),
+            Color(0xFF7A0000),
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.65),
+            blurRadius: 18,
+            offset: const Offset(5, 7),
+          ),
+          BoxShadow(
+            color: Colors.white.withValues(alpha: 0.18),
+            blurRadius: 8,
+            offset: const Offset(-3, -3),
+          ),
+          if (sosActive)
+            BoxShadow(
+              color: Colors.redAccent.withValues(alpha: 0.95),
+              blurRadius: 35,
+              spreadRadius: 8,
+            ),
+        ],
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.35),
+          width: 2,
+        ),
+      ),
+      child: Container(
+        margin: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFFFF7777),
+              Color(0xFFE00000),
+              Color(0xFF9B0000),
+            ],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.45),
+              blurRadius: 8,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: const Center(
+          child: Text(
+            'SOS',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 2,
+              shadows: [
+                Shadow(
+                  color: Colors.black54,
+                  blurRadius: 4,
+                  offset: Offset(1, 2),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  ),
+),
+      const SizedBox(width: 10),
 
+      if (sosActive)
+        Expanded(
+          child: Container(
+            height: 70,
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF111827),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.redAccent),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'SOS poslan na $sosSentCount korisnika',
+                  style: const TextStyle(
+                    color: Colors.redAccent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  'SOS prihvatilo $sosAcceptedCount/$sosSentCount',
+                  style: const TextStyle(
+                    color: Colors.blueAccent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  'Čeka odgovor $sosPendingCount/$sosSentCount',
+                  style: const TextStyle(
+                    color: Colors.amberAccent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+    ],
+  ),
+),
           if (connectedCount == 0)
             Container(
               width: double.infinity,
@@ -596,7 +832,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
           if (selectedPrivateDeviceName != null)
             Container(
-              height: 220,
+  height: MediaQuery.of(context).viewInsets.bottom > 0 ? 120 : 220,
               width: double.infinity,
               color: const Color(0xFF0B1220),
               child: Column(
