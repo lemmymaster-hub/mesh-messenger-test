@@ -211,6 +211,7 @@ Future<void> sendHello(String endpointId) async {
   }
 
   void _handleIncomingPayload(String endpointId, Uint8List bytes) {
+    onLog?.call('PAYLOAD primljen od $endpointId | bytes: ${bytes.length}');
     final rawData = String.fromCharCodes(bytes);
 
     try {
@@ -236,9 +237,15 @@ if (meshMessage.type == 'hello') {
 }
       final isGroupMessage = meshMessage.type == 'group';
 final isPrivateMessage = meshMessage.type == 'private';
+final isSosMessage = meshMessage.type == 'sos';
+final isSosResponse =
+    meshMessage.type == 'sos_accept' || meshMessage.type == 'sos_reject';
 
 final isForMe =
-    isGroupMessage || (isPrivateMessage && meshMessage.receiverId == deviceId);
+    isGroupMessage ||
+    isSosMessage ||
+    isSosResponse ||
+    (isPrivateMessage && meshMessage.receiverId == deviceId);
 
       if (isForMe) {
         onLog?.call(
@@ -337,6 +344,60 @@ if (meshMessage.senderName.isNotEmpty) {
     onLog?.call('Prekinuta konekcija: $id');
     onDevicesChanged?.call();
   }
+  Future<void> sendSosResponse({
+  required String sosId,
+  required String responseType, // sos_accept ili sos_reject
+  String reason = '',
+}) async {
+  if (deviceName.isEmpty) {
+    onLog?.call('Prvo unesi ime uređaja.');
+    return;
+  }
+
+  if (deviceId.isEmpty) {
+    await loadOrCreateDeviceId();
+  }
+
+  if (connectedDevices.isEmpty) {
+    onLog?.call('Nema povezanih uređaja za SOS odgovor');
+    return;
+  }
+
+  final text = responseType == 'sos_accept'
+      ? '$deviceName prihvatio SOS'
+      : '$deviceName odbio SOS${reason.isNotEmpty ? ' - $reason' : ''}';
+
+  final meshMessage = MeshMessage(
+    messageId: uuid.v4(),
+    senderId: deviceId,
+    senderName: deviceName,
+    receiverId: 'ALL',
+    text: text,
+    type: responseType,
+    hopCount: 0,
+    maxHops: 5,
+    timestamp: DateTime.now().millisecondsSinceEpoch,
+    sosId: sosId,
+    sosReason: reason,
+  );
+
+  processedMessages.add(meshMessage.messageId);
+
+  final encodedMessage = meshMessage.encode();
+
+  for (final endpointId in connectedDevices.keys) {
+    try {
+      await Nearby().sendBytesPayload(
+        endpointId,
+        Uint8List.fromList(encodedMessage.codeUnits),
+      );
+
+      onLog?.call('SOS odgovor poslat: $responseType -> ${connectedDevices[endpointId]}');
+    } catch (e) {
+      onLog?.call('Greška SOS odgovora ka $endpointId: $e');
+    }
+  }
+}
   Future<void> sendSosMessage({
   required double latitude,
   required double longitude,
@@ -383,11 +444,19 @@ if (meshMessage.senderName.isNotEmpty) {
   final encodedMessage = meshMessage.encode();
 
   for (final endpointId in connectedDevices.keys) {
+  try {
+    onLog?.call('SOS slanje ka: ${connectedDevices[endpointId]} | $endpointId');
+
     await Nearby().sendBytesPayload(
       endpointId,
       Uint8List.fromList(encodedMessage.codeUnits),
     );
+
+    onLog?.call('SOS payload poslat ka: ${connectedDevices[endpointId]}');
+  } catch (e) {
+    onLog?.call('Greška SOS slanja ka $endpointId: $e');
   }
+}
 
   onLog?.call('SOS poslat: $sosId');
 }
