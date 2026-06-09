@@ -4,7 +4,7 @@ import 'package:nearby_connections/nearby_connections.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
-
+import 'dart:convert';
 import '../models/mesh_message.dart';
 
 class NearbyService {
@@ -75,7 +75,7 @@ Future<void> sendHello(String endpointId) async {
   await Nearby().sendBytesPayload(
     endpointId,
     Uint8List.fromList(
-      hello.encode().codeUnits,
+      utf8.encode(hello.encode()),
     ),
   );
 
@@ -212,7 +212,7 @@ Future<void> sendHello(String endpointId) async {
 
   void _handleIncomingPayload(String endpointId, Uint8List bytes) {
     onLog?.call('PAYLOAD primljen od $endpointId | bytes: ${bytes.length}');
-    final rawData = String.fromCharCodes(bytes);
+    final rawData = utf8.decode(bytes);
 
     try {
       final meshMessage = MeshMessage.decode(rawData);
@@ -313,7 +313,7 @@ if (meshMessage.senderName.isNotEmpty) {
 
       await Nearby().sendBytesPayload(
         endpointId,
-        Uint8List.fromList(encodedMessage.codeUnits),
+        Uint8List.fromList(utf8.encode(encodedMessage)),
       );
 
       onLog?.call(
@@ -389,7 +389,7 @@ if (meshMessage.senderName.isNotEmpty) {
     try {
       await Nearby().sendBytesPayload(
         endpointId,
-        Uint8List.fromList(encodedMessage.codeUnits),
+       Uint8List.fromList(utf8.encode(encodedMessage)),
       );
 
       onLog?.call('SOS odgovor poslat: $responseType -> ${connectedDevices[endpointId]}');
@@ -449,7 +449,7 @@ if (meshMessage.senderName.isNotEmpty) {
 
     await Nearby().sendBytesPayload(
       endpointId,
-      Uint8List.fromList(encodedMessage.codeUnits),
+      Uint8List.fromList(utf8.encode(encodedMessage)),
     );
 
     onLog?.call('SOS payload poslat ka: ${connectedDevices[endpointId]}');
@@ -497,7 +497,7 @@ Future<void> sendPrivateMessage({
   for (final endpointId in connectedDevices.keys) {
     await Nearby().sendBytesPayload(
       endpointId,
-      Uint8List.fromList(encodedMessage.codeUnits),
+      Uint8List.fromList(utf8.encode(encodedMessage)),
     );
   }
 
@@ -537,7 +537,7 @@ Future<void> sendPrivateMessage({
     for (final endpointId in connectedDevices.keys) {
       await Nearby().sendBytesPayload(
         endpointId,
-        Uint8List.fromList(encodedMessage.codeUnits),
+        Uint8List.fromList(utf8.encode(encodedMessage)),
       );
     }
 

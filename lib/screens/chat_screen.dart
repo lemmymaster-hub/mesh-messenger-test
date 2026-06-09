@@ -149,6 +149,9 @@ class _ChatScreenState extends State<ChatScreen> {
           incomingSosSender = senderName;
           incomingSosMessage = message;
           incomingSosId = DateTime.now().millisecondsSinceEpoch.toString();
+          _addSosPublicLog(
+  '🆘 $senderName aktivirao SOS u ${_formatTime(DateTime.now())}',
+);
           } else if (type == 'sos_accept') {
   if (sosAcceptedCount < sosSentCount) {
     sosAcceptedCount++;
@@ -158,14 +161,9 @@ class _ChatScreenState extends State<ChatScreen> {
     sosPendingCount--;
   }
 
-  _messages.add(
-    ChatMessage(
-      text: '$senderName prihvatio SOS ${_formatTime(DateTime.now())}',
-      isMe: false,
-      time: DateTime.now(),
-      senderName: 'SOS odgovor',
-    ),
-  );
+ _addSosPublicLog(
+  '✅ $senderName prihvatio SOS u ${_formatTime(DateTime.now())}',
+);
 } else if (type == 'sos_reject') {
     if (sosRejectedCount < sosSentCount) {
     sosRejectedCount++;
@@ -174,14 +172,9 @@ class _ChatScreenState extends State<ChatScreen> {
     sosPendingCount--;
   }
 
-  _messages.add(
-    ChatMessage(
-      text: message,
-      isMe: false,
-      time: DateTime.now(),
-      senderName: 'SOS odgovor',
-    ),
-  );
+ _addSosPublicLog(
+  '❌ $message u ${_formatTime(DateTime.now())}',
+);
         } else if (type == 'private') {
           _privateMessages.add(
             ChatMessage(
@@ -227,7 +220,16 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     );
   }
-
+void _addSosPublicLog(String text) {
+  _messages.add(
+    ChatMessage(
+      text: text,
+      isMe: false,
+      time: DateTime.now(),
+      senderName: '🆘 SOS status',
+    ),
+  );
+}
   Future<void> _saveDeviceName() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) return;
