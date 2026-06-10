@@ -6,7 +6,7 @@ class MeshMessage {
   final String senderName;
   final String receiverId;
   final String text;
-  final String type; // group, private, hello, sos, sos_accept, sos_reject
+  final String type; // group, private, hello, sos, sos_accept, sos_reject, sos_cancel
   final int hopCount;
   final int maxHops;
   final int timestamp;

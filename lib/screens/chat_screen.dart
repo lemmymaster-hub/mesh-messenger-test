@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-
+import 'dart:async';
 import '../models/chat_message.dart';
 import '../services/nearby_service.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -11,13 +12,16 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _controller = TextEditingController();
   final TextEditingController _nameController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
   late final NearbyService nearbyService;
-
+late final AnimationController _sosPulseController;
+late final Animation<double> _sosPulseAnimation;
+final AudioPlayer _sosAudioPlayer = AudioPlayer();
   final List<ChatMessage> _messages = [];
   final List<String> _logs = [];
   final List<ChatMessage> _privateMessages = [];
@@ -30,7 +34,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   bool sosActive = false;
   bool incomingSosActive = false;
-
+bool sosAlarmActive = false;
+Timer? sosAlarmRepeatTimer;
+Timer? sosAlarmStopTimer;
   String incomingSosSender = '';
   String incomingSosMessage = '';
   String? incomingSosId;
@@ -120,6 +126,20 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    _sosPulseController = AnimationController(
+  vsync: this,
+  duration: const Duration(milliseconds: 650),
+);
+
+_sosPulseAnimation = Tween<double>(
+  begin: 1.0,
+  end: 1.14,
+).animate(
+  CurvedAnimation(
+    parent: _sosPulseController,
+    curve: Curves.easeInOut,
+  ),
+);
     nearbyService = NearbyService();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -157,38 +177,52 @@ class _ChatScreenState extends State<ChatScreen> {
         (message, endpointId, senderName, type) {
       if (!mounted) return;
 
+      final shouldStartSosAlarm = type == 'sos';
+
       setState(() {
         if (type == 'sos') {
           incomingSosActive = true;
           incomingSosSender = senderName;
           incomingSosMessage = message;
           incomingSosId = DateTime.now().millisecondsSinceEpoch.toString();
+
           _addSosPublicLog(
-  '🆘 $senderName aktivirao SOS u ${_formatTime(DateTime.now())}',
-);
-          } else if (type == 'sos_accept') {
-  if (sosAcceptedCount < sosSentCount) {
-    sosAcceptedCount++;
-  }
+            '🆘 $senderName aktivirao SOS u ${_formatTime(DateTime.now())}',
+          );
+        } else if (type == 'sos_accept') {
+          if (sosAcceptedCount < sosSentCount) {
+            sosAcceptedCount++;
+          }
 
-  if (sosPendingCount > 0) {
-    sosPendingCount--;
-  }
+          if (sosPendingCount > 0) {
+            sosPendingCount--;
+          }
 
- _addSosPublicLog(
-  '✅ $senderName prihvatio SOS u ${_formatTime(DateTime.now())}',
-);
-} else if (type == 'sos_reject') {
-    if (sosRejectedCount < sosSentCount) {
-    sosRejectedCount++;
-  }
-  if (sosPendingCount > 0) {
-    sosPendingCount--;
-  }
+          _addSosPublicLog(
+            '✅ $senderName prihvatio SOS u ${_formatTime(DateTime.now())}',
+          );
+          } else if (type == 'sos_cancel') {
+  _stopIncomingSosAlarm();
 
- _addSosPublicLog(
-  '❌ $message u ${_formatTime(DateTime.now())}',
-);
+  incomingSosActive = false;
+  sosActive = false;
+  sosAlarmActive = false;
+  activeSosId = null;
+  _addSosPublicLog(
+    '✅ SOS ZAVRŠEN\n$message u ${_formatTime(DateTime.now())}',
+  );
+        } else if (type == 'sos_reject') {
+          if (sosRejectedCount < sosSentCount) {
+            sosRejectedCount++;
+          }
+
+          if (sosPendingCount > 0) {
+            sosPendingCount--;
+          }
+
+          _addSosPublicLog(
+            '❌ $message u ${_formatTime(DateTime.now())}',
+          );
         } else if (type == 'private') {
           _privateMessages.add(
             ChatMessage(
@@ -214,6 +248,10 @@ class _ChatScreenState extends State<ChatScreen> {
           );
         }
       });
+
+      if (shouldStartSosAlarm) {
+        _startIncomingSosAlarm();
+      }
 
       _scrollToBottom();
     };
@@ -243,6 +281,74 @@ void _addSosPublicLog(String text) {
       senderName: '🆘 SOS status',
     ),
   );
+}
+Future<void> _startIncomingSosAlarm() async {
+  sosAlarmRepeatTimer?.cancel();
+  sosAlarmStopTimer?.cancel();
+
+  setState(() {
+    sosAlarmActive = true;
+  });
+_sosPulseController.repeat(reverse: true);
+await _sosAudioPlayer.setReleaseMode(ReleaseMode.loop);
+await _sosAudioPlayer.play(
+  AssetSource('sounds/sos_siren.mp3'),
+);
+  _addSosPublicLog(
+    '🚨 SOS alarm aktiviran - čeka se reakcija korisnika',
+  );
+
+  sosAlarmStopTimer = Timer(const Duration(seconds: 30), () {
+    if (!mounted) return;
+
+    setState(() {
+      sosAlarmActive = false;
+    });
+  });
+
+  sosAlarmRepeatTimer = Timer.periodic(
+    const Duration(minutes: 3),
+    (timer) {
+      if (!mounted || !incomingSosActive) {
+        timer.cancel();
+        return;
+      }
+
+      setState(() {
+        sosAlarmActive = true;
+      });
+
+      _addSosPublicLog(
+        '🚨 SOS alarm ponovljen - korisnik još nije reagovao',
+      );
+
+      sosAlarmStopTimer?.cancel();
+      sosAlarmStopTimer = Timer(const Duration(seconds: 30), () {
+        if (!mounted) return;
+
+        setState(() {
+          sosAlarmActive = false;
+        });
+      });
+    },
+  );
+}
+
+void _stopIncomingSosAlarm() {
+  sosAlarmRepeatTimer?.cancel();
+  sosAlarmStopTimer?.cancel();
+
+  sosAlarmRepeatTimer = null;
+  sosAlarmStopTimer = null;
+
+  if (!mounted) return;
+
+  setState(() {
+    sosAlarmActive = false;
+  });
+  _sosPulseController.stop();
+_sosPulseController.reset();
+_sosAudioPlayer.stop();
 }
   Future<void> _saveDeviceName() async {
     final name = _nameController.text.trim();
@@ -301,7 +407,7 @@ void _addSosPublicLog(String text) {
           ),
         );
       });
-
+_sosPulseController.repeat(reverse: true);
       await nearbyService.sendSosMessage(
         latitude: position.latitude,
         longitude: position.longitude,
@@ -311,6 +417,31 @@ void _addSosPublicLog(String text) {
       setState(() {});
     }
   }
+  Future<void> _cancelSos() async {
+  if (activeSosId == null) return;
+
+  await nearbyService.sendSosCancel(
+    sosId: activeSosId!,
+  );
+
+  _stopIncomingSosAlarm();
+
+  if (!mounted) return;
+
+  setState(() {
+    sosActive = false;
+    sosAlarmActive = false;
+    activeSosId = null;
+
+sosSentCount = 0;
+sosAcceptedCount = 0;
+sosRejectedCount = 0;
+sosPendingCount = 0;
+    _addSosPublicLog(
+      '✅ SOS ZAVRŠEN\nPomoć pružena ugroženoj osobi. ${_formatTime(DateTime.now())}',
+    );
+  });
+}
 
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
@@ -371,105 +502,106 @@ void _addSosPublicLog(String text) {
   }
 
   Widget _sosButton() {
-    return TweenAnimationBuilder<double>(
-      tween: Tween<double>(
-        begin: 1.0,
-        end: sosActive ? 1.10 : 1.0,
-      ),
-      duration: const Duration(milliseconds: 650),
-      curve: Curves.easeInOut,
-      builder: (context, scale, child) {
-        return Transform.scale(scale: scale, child: child);
-      },
-      onEnd: () {
-        if (sosActive && mounted) {
-          setState(() {});
-        }
-      },
-      child: GestureDetector(
-        onTap: _activateSos,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 350),
-          width: 88,
-          height: 88,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color(0xFFFF5A5A),
-                Color(0xFFD90000),
-                Color(0xFF7A0000),
-              ],
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.65),
-                blurRadius: 18,
-                offset: const Offset(5, 7),
-              ),
-              BoxShadow(
-                color: Colors.white.withValues(alpha: 0.18),
-                blurRadius: 8,
-                offset: const Offset(-3, -3),
-              ),
-              if (sosActive)
-                BoxShadow(
-                  color: Colors.redAccent.withValues(alpha: 0.95),
-                  blurRadius: 35,
-                  spreadRadius: 8,
-                ),
-            ],
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.35),
-              width: 2,
-            ),
+  final shouldPulse = sosActive || sosAlarmActive;
+
+  final button = GestureDetector(
+    onTap: sosActive ? _cancelSos : _activateSos,
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 350),
+      width: 88,
+      height: 88,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFFFF5A5A),
+            Color(0xFFD90000),
+            Color(0xFF7A0000),
+          ],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.65),
+            blurRadius: 18,
+            offset: const Offset(5, 7),
           ),
-          child: Container(
-            margin: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Color(0xFFFF7777),
-                  Color(0xFFE00000),
-                  Color(0xFF9B0000),
-                ],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.45),
-                  blurRadius: 8,
-                  offset: const Offset(0, 5),
+          BoxShadow(
+            color: Colors.white.withValues(alpha: 0.18),
+            blurRadius: 8,
+            offset: const Offset(-3, -3),
+          ),
+          if (shouldPulse)
+            BoxShadow(
+              color: Colors.redAccent.withValues(alpha: 0.95),
+              blurRadius: 35,
+              spreadRadius: 8,
+            ),
+        ],
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.35),
+          width: 2,
+        ),
+      ),
+      child: Container(
+        margin: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFFFF7777),
+              Color(0xFFE00000),
+              Color(0xFF9B0000),
+            ],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.45),
+              blurRadius: 8,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Center(
+  child: Text(
+    sosActive ? 'STOP' : 'SOS',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1,
+              shadows: [
+                Shadow(
+                  color: Colors.black54,
+                  blurRadius: 4,
+                  offset: Offset(1, 2),
                 ),
               ],
-            ),
-            child: const Center(
-              child: Text(
-                'SOS',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2,
-                  shadows: [
-                    Shadow(
-                      color: Colors.black54,
-                      blurRadius: 4,
-                      offset: Offset(1, 2),
-                    ),
-                  ],
-                ),
-              ),
             ),
           ),
         ),
       ),
-    );
+    ),
+  );
+
+  if (!shouldPulse) {
+    return button;
   }
+
+  return AnimatedBuilder(
+    animation: _sosPulseAnimation,
+    builder: (context, child) {
+      return Transform.scale(
+        scale: _sosPulseAnimation.value,
+        child: child,
+      );
+    },
+    child: button,
+  );
+}
 Future<void> _showRejectSosDialog() async {
   if (incomingSosId == null) return;
 
@@ -588,7 +720,7 @@ Future<void> _showRejectSosDialog() async {
   );
 
   if (!mounted) return;
-
+_stopIncomingSosAlarm();
   setState(() {
     incomingSosActive = false;
 
@@ -652,7 +784,7 @@ Future<void> _showRejectSosDialog() async {
     sosId: incomingSosId!,
     responseType: 'sos_accept',
   );
-
+_stopIncomingSosAlarm();
   setState(() {
     incomingSosActive = false;
 
@@ -1040,9 +1172,11 @@ Text(
               controller: _controller,
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
-                hintText: selectedPrivateDeviceName == null
-                    ? 'Unesi mesh poruku...'
-                    : 'Privatna poruka za $selectedPrivateDeviceName...',
+                hintText: incomingSosActive
+    ? 'Prvo reaguj na SOS poruku...'
+    : selectedPrivateDeviceName == null
+        ? 'Unesi mesh poruku...'
+        : 'Privatna poruka za $selectedPrivateDeviceName...',
                 hintStyle: TextStyle(
                   color: Colors.white.withValues(alpha: 0.5),
                 ),
@@ -1057,7 +1191,11 @@ Text(
                   vertical: 12,
                 ),
               ),
-              onSubmitted: (_) => _sendMessage(),
+              onSubmitted: (_) {
+  if (!incomingSosActive) {
+    _sendMessage();
+  }
+},
             ),
           ),
           const SizedBox(width: 8),
@@ -1065,7 +1203,7 @@ Text(
             backgroundColor: const Color(0xFF2563EB),
             child: IconButton(
               icon: const Icon(Icons.send, color: Colors.white),
-              onPressed: _sendMessage,
+              onPressed: incomingSosActive ? null : _sendMessage,
             ),
           ),
         ],
@@ -1078,6 +1216,8 @@ Text(
     _controller.dispose();
     _nameController.dispose();
     _scrollController.dispose();
+    _sosPulseController.dispose();
+    _sosAudioPlayer.dispose();
     nearbyService.dispose();
     super.dispose();
   }
