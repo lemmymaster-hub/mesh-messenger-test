@@ -19,9 +19,9 @@ class _ChatScreenState extends State<ChatScreen>
   final ScrollController _scrollController = ScrollController();
 
   late final NearbyService nearbyService;
-late final AnimationController _sosPulseController;
-late final Animation<double> _sosPulseAnimation;
-final AudioPlayer _sosAudioPlayer = AudioPlayer();
+  late final AnimationController _sosPulseController;
+  late final Animation<double> _sosPulseAnimation;
+  final AudioPlayer _sosAudioPlayer = AudioPlayer();
   final List<ChatMessage> _messages = [];
   final List<String> _logs = [];
   final List<ChatMessage> _privateMessages = [];
@@ -31,12 +31,13 @@ final AudioPlayer _sosAudioPlayer = AudioPlayer();
   String? selectedPrivateDeviceId;
   String? selectedPrivateDeviceName;
   String? selectedPrivateEndpointId;
-
+  bool showSosModal = false;
   bool sosActive = false;
   bool incomingSosActive = false;
-bool sosAlarmActive = false;
-Timer? sosAlarmRepeatTimer;
-Timer? sosAlarmStopTimer;
+  bool sosAlarmActive = false;
+  bool internetAvailable = false;
+  Timer? sosAlarmRepeatTimer;
+  Timer? sosAlarmStopTimer;
   String incomingSosSender = '';
   String incomingSosMessage = '';
   String? incomingSosId;
@@ -47,40 +48,11 @@ Timer? sosAlarmStopTimer;
   int sosRejectedCount = 0;
 
   String? activeSosId;
-
-  Widget _deviceChip(String name, Color color, {bool selected = false}) {
-  return Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-    decoration: BoxDecoration(
-      color: selected
-          ? color.withValues(alpha: 0.28)
-          : color.withValues(alpha: 0.12),
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(
-        color: selected ? Colors.white : color,
-        width: selected ? 2 : 1,
-      ),
-      boxShadow: selected
-          ? [
-              BoxShadow(
-                color: color.withValues(alpha: 0.55),
-                blurRadius: 12,
-                spreadRadius: 2,
-              ),
-            ]
-          : [],
-    ),
-    child: Text(
-      name,
-      style: TextStyle(
-        color: selected ? Colors.white : color,
-        fontSize: 12,
-        fontWeight: FontWeight.bold,
-      ),
-    ),
-  );
-}
-
+  String? pinnedSosStatus;
+  String? pinnedSosTitle;
+  String? pinnedSosMessage;
+  String? pinnedSosSender;
+  String? pinnedSosTime;
   void _showConnectedDeviceOptions(String endpointId, String name) {
     showModalBottomSheet(
       context: context,
@@ -127,25 +99,19 @@ Timer? sosAlarmStopTimer;
   void initState() {
     super.initState();
     _sosPulseController = AnimationController(
-  vsync: this,
-  duration: const Duration(milliseconds: 650),
-);
+      vsync: this,
+      duration: const Duration(milliseconds: 650),
+    );
 
-_sosPulseAnimation = Tween<double>(
-  begin: 1.0,
-  end: 1.14,
-).animate(
-  CurvedAnimation(
-    parent: _sosPulseController,
-    curve: Curves.easeInOut,
-  ),
-);
+    _sosPulseAnimation = Tween<double>(begin: 1.0, end: 1.14).animate(
+      CurvedAnimation(parent: _sosPulseController, curve: Curves.easeInOut),
+    );
     nearbyService = NearbyService();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final savedName = await nearbyService.loadDeviceName();
       await nearbyService.loadOrCreateDeviceId();
-
+      internetAvailable = await nearbyService.hasInternetConnection();
       if (!mounted) return;
 
       if (savedName == null) {
@@ -173,8 +139,7 @@ _sosPulseAnimation = Tween<double>(
       });
     };
 
-    nearbyService.onMessageReceived =
-        (message, endpointId, senderName, type) {
+    nearbyService.onMessageReceived = (message, endpointId, senderName, type) {
       if (!mounted) return;
 
       final shouldStartSosAlarm = type == 'sos';
@@ -182,10 +147,16 @@ _sosPulseAnimation = Tween<double>(
       setState(() {
         if (type == 'sos') {
           incomingSosActive = true;
+          showSosModal = true;
           incomingSosSender = senderName;
           incomingSosMessage = message;
           incomingSosId = DateTime.now().millisecondsSinceEpoch.toString();
-
+          _setPinnedSosCard(
+            status: 'active',
+            title: '🆘 AKTIVAN SOS',
+            message: message,
+            sender: senderName,
+          );
           _addSosPublicLog(
             '🆘 $senderName aktivirao SOS u ${_formatTime(DateTime.now())}',
           );
@@ -197,20 +168,31 @@ _sosPulseAnimation = Tween<double>(
           if (sosPendingCount > 0) {
             sosPendingCount--;
           }
-
+          _setPinnedSosCard(
+            status: 'accepted',
+            title: '🚑 POMOĆ NA PUTU',
+            message: '$senderName prihvatio SOS.',
+            sender: senderName,
+          );
           _addSosPublicLog(
             '✅ $senderName prihvatio SOS u ${_formatTime(DateTime.now())}',
           );
-          } else if (type == 'sos_cancel') {
-  _stopIncomingSosAlarm();
+        } else if (type == 'sos_cancel') {
+          _stopIncomingSosAlarm();
 
-  incomingSosActive = false;
-  sosActive = false;
-  sosAlarmActive = false;
-  activeSosId = null;
-  _addSosPublicLog(
-    '✅ SOS ZAVRŠEN\n$message u ${_formatTime(DateTime.now())}',
-  );
+          incomingSosActive = false;
+          sosActive = false;
+          sosAlarmActive = false;
+          activeSosId = null;
+          _setPinnedSosCard(
+            status: 'finished',
+            title: '✅ SOS ZAVRŠEN',
+            message: message,
+            sender: senderName,
+          );
+          _addSosPublicLog(
+            '✅ SOS ZAVRŠEN\n$message u ${_formatTime(DateTime.now())}',
+          );
         } else if (type == 'sos_reject') {
           if (sosRejectedCount < sosSentCount) {
             sosRejectedCount++;
@@ -220,9 +202,7 @@ _sosPulseAnimation = Tween<double>(
             sosPendingCount--;
           }
 
-          _addSosPublicLog(
-            '❌ $message u ${_formatTime(DateTime.now())}',
-          );
+          _addSosPublicLog('❌ $message u ${_formatTime(DateTime.now())}');
         } else if (type == 'private') {
           _privateMessages.add(
             ChatMessage(
@@ -235,8 +215,7 @@ _sosPulseAnimation = Tween<double>(
 
           selectedPrivateEndpointId = endpointId;
           selectedPrivateDeviceName = senderName;
-          selectedPrivateDeviceId =
-              nearbyService.endpointDeviceIds[endpointId];
+          selectedPrivateDeviceId = nearbyService.endpointDeviceIds[endpointId];
         } else {
           _messages.add(
             ChatMessage(
@@ -272,43 +251,52 @@ _sosPulseAnimation = Tween<double>(
       ),
     );
   }
-void _addSosPublicLog(String text) {
-  _messages.add(
-    ChatMessage(
-      text: text,
-      isMe: false,
-      time: DateTime.now(),
-      senderName: '🆘 SOS status',
-    ),
-  );
-}
-Future<void> _startIncomingSosAlarm() async {
-  sosAlarmRepeatTimer?.cancel();
-  sosAlarmStopTimer?.cancel();
 
-  setState(() {
-    sosAlarmActive = true;
-  });
-_sosPulseController.repeat(reverse: true);
-await _sosAudioPlayer.setReleaseMode(ReleaseMode.loop);
-await _sosAudioPlayer.play(
-  AssetSource('sounds/sos_siren.mp3'),
-);
-  _addSosPublicLog(
-    '🚨 SOS alarm aktiviran - čeka se reakcija korisnika',
-  );
+  void _addSosPublicLog(String text) {
+    _messages.add(
+      ChatMessage(
+        text: text,
+        isMe: false,
+        time: DateTime.now(),
+        senderName: '🆘 SOS status',
+      ),
+    );
+  }
 
-  sosAlarmStopTimer = Timer(const Duration(seconds: 30), () {
-    if (!mounted) return;
+  void _setPinnedSosCard({
+    required String status,
+    required String title,
+    required String message,
+    required String sender,
+  }) {
+    pinnedSosStatus = status;
+    pinnedSosTitle = title;
+    pinnedSosMessage = message;
+    pinnedSosSender = sender;
+    pinnedSosTime = _formatTime(DateTime.now());
+  }
+
+  Future<void> _startIncomingSosAlarm() async {
+    sosAlarmRepeatTimer?.cancel();
+    sosAlarmStopTimer?.cancel();
 
     setState(() {
-      sosAlarmActive = false;
+      sosAlarmActive = true;
     });
-  });
+    _sosPulseController.repeat(reverse: true);
+    await _sosAudioPlayer.setReleaseMode(ReleaseMode.loop);
+    await _sosAudioPlayer.play(AssetSource('sounds/sos_siren.mp3'));
+    _addSosPublicLog('🚨 SOS alarm aktiviran - čeka se reakcija korisnika');
 
-  sosAlarmRepeatTimer = Timer.periodic(
-    const Duration(minutes: 3),
-    (timer) {
+    sosAlarmStopTimer = Timer(const Duration(seconds: 30), () {
+      if (!mounted) return;
+
+      setState(() {
+        sosAlarmActive = false;
+      });
+    });
+
+    sosAlarmRepeatTimer = Timer.periodic(const Duration(minutes: 3), (timer) {
       if (!mounted || !incomingSosActive) {
         timer.cancel();
         return;
@@ -318,9 +306,7 @@ await _sosAudioPlayer.play(
         sosAlarmActive = true;
       });
 
-      _addSosPublicLog(
-        '🚨 SOS alarm ponovljen - korisnik još nije reagovao',
-      );
+      _addSosPublicLog('🚨 SOS alarm ponovljen - korisnik još nije reagovao');
 
       sosAlarmStopTimer?.cancel();
       sosAlarmStopTimer = Timer(const Duration(seconds: 30), () {
@@ -330,26 +316,26 @@ await _sosAudioPlayer.play(
           sosAlarmActive = false;
         });
       });
-    },
-  );
-}
+    });
+  }
 
-void _stopIncomingSosAlarm() {
-  sosAlarmRepeatTimer?.cancel();
-  sosAlarmStopTimer?.cancel();
+  void _stopIncomingSosAlarm() {
+    sosAlarmRepeatTimer?.cancel();
+    sosAlarmStopTimer?.cancel();
 
-  sosAlarmRepeatTimer = null;
-  sosAlarmStopTimer = null;
+    sosAlarmRepeatTimer = null;
+    sosAlarmStopTimer = null;
 
-  if (!mounted) return;
+    if (!mounted) return;
 
-  setState(() {
-    sosAlarmActive = false;
-  });
-  _sosPulseController.stop();
-_sosPulseController.reset();
-_sosAudioPlayer.stop();
-}
+    setState(() {
+      sosAlarmActive = false;
+    });
+    _sosPulseController.stop();
+    _sosPulseController.reset();
+    _sosAudioPlayer.stop();
+  }
+
   Future<void> _saveDeviceName() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) return;
@@ -393,7 +379,14 @@ _sosAudioPlayer.stop();
         sosRejectedCount = 0;
         sosPendingCount = connectedCount;
         activeSosId = DateTime.now().millisecondsSinceEpoch.toString();
-
+        _setPinnedSosCard(
+          status: 'active',
+          title: '🆘 AKTIVAN SOS',
+          message:
+              'SOS POSLAT\n'
+              'Lokacija: ${position.latitude}, ${position.longitude}',
+          sender: nearbyService.deviceName,
+        );
         _messages.insert(
           0,
           ChatMessage(
@@ -407,7 +400,7 @@ _sosAudioPlayer.stop();
           ),
         );
       });
-_sosPulseController.repeat(reverse: true);
+      _sosPulseController.repeat(reverse: true);
       await nearbyService.sendSosMessage(
         latitude: position.latitude,
         longitude: position.longitude,
@@ -417,31 +410,30 @@ _sosPulseController.repeat(reverse: true);
       setState(() {});
     }
   }
+
   Future<void> _cancelSos() async {
-  if (activeSosId == null) return;
+    if (activeSosId == null) return;
 
-  await nearbyService.sendSosCancel(
-    sosId: activeSosId!,
-  );
+    await nearbyService.sendSosCancel(sosId: activeSosId!);
 
-  _stopIncomingSosAlarm();
+    _stopIncomingSosAlarm();
 
-  if (!mounted) return;
+    if (!mounted) return;
 
-  setState(() {
-    sosActive = false;
-    sosAlarmActive = false;
-    activeSosId = null;
+    setState(() {
+      sosActive = false;
+      sosAlarmActive = false;
+      activeSosId = null;
 
-sosSentCount = 0;
-sosAcceptedCount = 0;
-sosRejectedCount = 0;
-sosPendingCount = 0;
-    _addSosPublicLog(
-      '✅ SOS ZAVRŠEN\nPomoć pružena ugroženoj osobi. ${_formatTime(DateTime.now())}',
-    );
-  });
-}
+      sosSentCount = 0;
+      sosAcceptedCount = 0;
+      sosRejectedCount = 0;
+      sosPendingCount = 0;
+      _addSosPublicLog(
+        '✅ SOS ZAVRŠEN\nPomoć pružena ugroženoj osobi. ${_formatTime(DateTime.now())}',
+      );
+    });
+  }
 
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
@@ -502,240 +494,393 @@ sosPendingCount = 0;
   }
 
   Widget _sosButton() {
-  final shouldPulse = sosActive || sosAlarmActive;
+    final shouldPulse = sosActive || sosAlarmActive;
 
-  final button = GestureDetector(
-    onTap: sosActive ? _cancelSos : _activateSos,
-    child: AnimatedContainer(
-      duration: const Duration(milliseconds: 350),
-      width: 88,
-      height: 88,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFFFF5A5A),
-            Color(0xFFD90000),
-            Color(0xFF7A0000),
-          ],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.65),
-            blurRadius: 18,
-            offset: const Offset(5, 7),
-          ),
-          BoxShadow(
-            color: Colors.white.withValues(alpha: 0.18),
-            blurRadius: 8,
-            offset: const Offset(-3, -3),
-          ),
-          if (shouldPulse)
-            BoxShadow(
-              color: Colors.redAccent.withValues(alpha: 0.95),
-              blurRadius: 35,
-              spreadRadius: 8,
-            ),
-        ],
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.35),
-          width: 2,
-        ),
-      ),
-      child: Container(
-        margin: const EdgeInsets.all(8),
+    final button = GestureDetector(
+      onTap: sosActive ? _cancelSos : _activateSos,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 350),
+        width: 88,
+        height: 88,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           gradient: const LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFFFF7777),
-              Color(0xFFE00000),
-              Color(0xFF9B0000),
-            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFFFF5A5A), Color(0xFFD90000), Color(0xFF7A0000)],
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.45),
-              blurRadius: 8,
-              offset: const Offset(0, 5),
+              color: Colors.black.withValues(alpha: 0.65),
+              blurRadius: 18,
+              offset: const Offset(5, 7),
             ),
+            BoxShadow(
+              color: Colors.white.withValues(alpha: 0.18),
+              blurRadius: 8,
+              offset: const Offset(-3, -3),
+            ),
+            if (shouldPulse)
+              BoxShadow(
+                color: Colors.redAccent.withValues(alpha: 0.95),
+                blurRadius: 35,
+                spreadRadius: 8,
+              ),
           ],
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.35),
+            width: 2,
+          ),
         ),
-        child: Center(
-  child: Text(
-    sosActive ? 'STOP' : 'SOS',
+        child: Container(
+          margin: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFFFF7777), Color(0xFFE00000), Color(0xFF9B0000)],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.45),
+                blurRadius: 8,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Center(
+            child: Text(
+              sosActive ? 'STOP' : 'SOS',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1,
+                shadows: [
+                  Shadow(
+                    color: Colors.black54,
+                    blurRadius: 4,
+                    offset: Offset(1, 2),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (!shouldPulse) {
+      return button;
+    }
+
+    return AnimatedBuilder(
+      animation: _sosPulseAnimation,
+      builder: (context, child) {
+        return Transform.scale(scale: _sosPulseAnimation.value, child: child);
+      },
+      child: button,
+    );
+  }
+
+  Future<void> _showRejectSosDialog() async {
+    if (incomingSosId == null) return;
+
+    String selectedReason = 'Nisam u mogućnosti da pomognem';
+    String customReason = '';
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF151A23),
+              title: const Text(
+                'Odbij SOS',
+                style: TextStyle(color: Colors.white),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    RadioListTile<String>(
+                      value: 'Nisam u mogućnosti da pomognem',
+                      groupValue: selectedReason,
+                      activeColor: Colors.redAccent,
+                      title: const Text(
+                        'Nisam u mogućnosti da pomognem',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      onChanged: (value) {
+                        setDialogState(() {
+                          selectedReason = value!;
+                        });
+                      },
+                    ),
+                    RadioListTile<String>(
+                      value: 'Mislim da je lažni SOS',
+                      groupValue: selectedReason,
+                      activeColor: Colors.redAccent,
+                      title: const Text(
+                        'Mislim da je lažni SOS',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      onChanged: (value) {
+                        setDialogState(() {
+                          selectedReason = value!;
+                        });
+                      },
+                    ),
+                    RadioListTile<String>(
+                      value: 'Drugi razlog',
+                      groupValue: selectedReason,
+                      activeColor: Colors.redAccent,
+                      title: const Text(
+                        'Drugi razlog',
+                        style: TextStyle(color: Colors.white),
+                      ),
+                      onChanged: (value) {
+                        setDialogState(() {
+                          selectedReason = value!;
+                        });
+                      },
+                    ),
+                    if (selectedReason == 'Drugi razlog')
+                      TextField(
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: 'Unesi razlog...',
+                          hintStyle: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.5),
+                          ),
+                        ),
+                        onChanged: (value) {
+                          customReason = value.trim();
+                        },
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                  },
+                  child: const Text('Nazad'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.redAccent,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () {
+                    final reason = selectedReason == 'Drugi razlog'
+                        ? customReason
+                        : selectedReason;
+
+                    if (reason.isEmpty) return;
+
+                    Navigator.of(dialogContext).pop(reason);
+                  },
+                  child: const Text('Potvrdi'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result == null || result.isEmpty) return;
+
+    await nearbyService.sendSosResponse(
+      sosId: incomingSosId!,
+      responseType: 'sos_reject',
+      reason: result,
+    );
+
+    if (!mounted) return;
+    _stopIncomingSosAlarm();
+    setState(() {
+      incomingSosActive = false;
+
+      _messages.add(
+        ChatMessage(
+          text:
+              '${nearbyService.deviceName} odbio SOS - $result '
+              '${_formatTime(DateTime.now())}',
+          isMe: true,
+          time: DateTime.now(),
+          senderName: 'SOS odgovor',
+        ),
+      );
+    });
+  }
+
+  Widget _pinnedSosCard() {
+    if (pinnedSosStatus == null || pinnedSosStatus == 'active') {
+      return const SizedBox.shrink();
+    }
+
+    Color borderColor = Colors.redAccent;
+    Color backgroundColor = const Color(0xFF2A0505);
+
+    if (pinnedSosStatus == 'accepted') {
+      borderColor = Colors.orangeAccent;
+      backgroundColor = const Color(0xFF2A1A05);
+    } else if (pinnedSosStatus == 'finished') {
+      borderColor = Colors.greenAccent;
+      backgroundColor = const Color(0xFF052A12);
+    } else if (pinnedSosStatus == 'expired') {
+      borderColor = Colors.amberAccent;
+      backgroundColor = const Color(0xFF2A2205);
+    }
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor, width: 1.4),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            pinnedSosTitle ?? '',
             style: TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 1,
-              shadows: [
-                Shadow(
-                  color: Colors.black54,
-                  blurRadius: 4,
-                  offset: Offset(1, 2),
+              color: borderColor,
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 6),
+          if (pinnedSosSender != null)
+            Text(
+              'Pošiljalac: $pinnedSosSender',
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          if (pinnedSosTime != null)
+            Text(
+              'Vrijeme: $pinnedSosTime',
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          const SizedBox(height: 6),
+          Text(
+            pinnedSosMessage ?? '',
+            maxLines: 5,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sosModal() {
+    if (!showSosModal) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withValues(alpha: 0.85),
+        child: Center(
+          child: Container(
+            margin: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF2A0505),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.redAccent, width: 2),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  '🚨 HITAN SOS POZIV 🚨',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.redAccent,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                Text(
+                  incomingSosSender,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                Text(
+                  incomingSosMessage,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white),
+                ),
+
+                const SizedBox(height: 20),
+
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          if (incomingSosId == null) return;
+
+                          await nearbyService.sendSosResponse(
+                            sosId: incomingSosId!,
+                            responseType: 'sos_accept',
+                          );
+
+                          _stopIncomingSosAlarm();
+
+                          if (!mounted) return;
+
+                          setState(() {
+                            showSosModal = false;
+                            incomingSosActive = false;
+                          });
+                        },
+                        child: const Text('PRIHVATI'),
+                      ),
+                    ),
+
+                    const SizedBox(width: 12),
+
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          setState(() {
+                            showSosModal = false;
+                          });
+
+                          _showRejectSosDialog();
+                        },
+                        child: const Text('ODBIJ'),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
         ),
       ),
-    ),
-  );
-
-  if (!shouldPulse) {
-    return button;
+    );
   }
 
-  return AnimatedBuilder(
-    animation: _sosPulseAnimation,
-    builder: (context, child) {
-      return Transform.scale(
-        scale: _sosPulseAnimation.value,
-        child: child,
-      );
-    },
-    child: button,
-  );
-}
-Future<void> _showRejectSosDialog() async {
-  if (incomingSosId == null) return;
-
-  String selectedReason = 'Nisam u mogućnosti da pomognem';
-  String customReason = '';
-
-  final result = await showDialog<String>(
-    context: context,
-    builder: (dialogContext) {
-      return StatefulBuilder(
-        builder: (dialogContext, setDialogState) {
-          return AlertDialog(
-            backgroundColor: const Color(0xFF151A23),
-            title: const Text(
-              'Odbij SOS',
-              style: TextStyle(color: Colors.white),
-            ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  RadioListTile<String>(
-                    value: 'Nisam u mogućnosti da pomognem',
-                    groupValue: selectedReason,
-                    activeColor: Colors.redAccent,
-                    title: const Text(
-                      'Nisam u mogućnosti da pomognem',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                    onChanged: (value) {
-                      setDialogState(() {
-                        selectedReason = value!;
-                      });
-                    },
-                  ),
-                  RadioListTile<String>(
-                    value: 'Mislim da je lažni SOS',
-                    groupValue: selectedReason,
-                    activeColor: Colors.redAccent,
-                    title: const Text(
-                      'Mislim da je lažni SOS',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                    onChanged: (value) {
-                      setDialogState(() {
-                        selectedReason = value!;
-                      });
-                    },
-                  ),
-                  RadioListTile<String>(
-                    value: 'Drugi razlog',
-                    groupValue: selectedReason,
-                    activeColor: Colors.redAccent,
-                    title: const Text(
-                      'Drugi razlog',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                    onChanged: (value) {
-                      setDialogState(() {
-                        selectedReason = value!;
-                      });
-                    },
-                  ),
-                  if (selectedReason == 'Drugi razlog')
-                    TextField(
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        hintText: 'Unesi razlog...',
-                        hintStyle: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.5),
-                        ),
-                      ),
-                      onChanged: (value) {
-                        customReason = value.trim();
-                      },
-                    ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(dialogContext).pop();
-                },
-                child: const Text('Nazad'),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.redAccent,
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: () {
-                  final reason = selectedReason == 'Drugi razlog'
-                      ? customReason
-                      : selectedReason;
-
-                  if (reason.isEmpty) return;
-
-                  Navigator.of(dialogContext).pop(reason);
-                },
-                child: const Text('Potvrdi'),
-              ),
-            ],
-          );
-        },
-      );
-    },
-  );
-
-  if (result == null || result.isEmpty) return;
-
-  await nearbyService.sendSosResponse(
-    sosId: incomingSosId!,
-    responseType: 'sos_reject',
-    reason: result,
-  );
-
-  if (!mounted) return;
-_stopIncomingSosAlarm();
-  setState(() {
-    incomingSosActive = false;
-
-    _messages.add(
-      ChatMessage(
-        text:
-            '${nearbyService.deviceName} odbio SOS - $result '
-            '${_formatTime(DateTime.now())}',
-        isMe: true,
-        time: DateTime.now(),
-        senderName: 'SOS odgovor',
-      ),
-    );
-  });
-}
   Widget _incomingSosPanel() {
     return Container(
       width: double.infinity,
@@ -765,74 +910,74 @@ _stopIncomingSosAlarm();
             style: const TextStyle(color: Colors.white, fontSize: 12),
           ),
           if (selectedPrivateDeviceName == null) ...[
-  const SizedBox(height: 8),
-  Row(
-            children: [
-              Expanded(
-                child: SizedBox(
-                  height: 34,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.redAccent,
-                      foregroundColor: Colors.white,
-                      padding: EdgeInsets.zero,
-                    ),
-                    onPressed: () async {
-  if (incomingSosId == null) return;
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 34,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                        foregroundColor: Colors.white,
+                        padding: EdgeInsets.zero,
+                      ),
+                      onPressed: () async {
+                        if (incomingSosId == null) return;
 
-  await nearbyService.sendSosResponse(
-    sosId: incomingSosId!,
-    responseType: 'sos_accept',
-  );
-_stopIncomingSosAlarm();
-  setState(() {
-    incomingSosActive = false;
+                        await nearbyService.sendSosResponse(
+                          sosId: incomingSosId!,
+                          responseType: 'sos_accept',
+                        );
+                        _stopIncomingSosAlarm();
+                        setState(() {
+                          incomingSosActive = false;
 
-    _messages.add(
-      ChatMessage(
-        text:
-            '${nearbyService.deviceName} prihvatio SOS '
-            '${_formatTime(DateTime.now())}',
-        isMe: true,
-        time: DateTime.now(),
-        senderName: 'SOS odgovor',
-      ),
-    );
-  });
-},
-                    child: const Text(
-                      'PRIHVATI',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
+                          _messages.add(
+                            ChatMessage(
+                              text:
+                                  '${nearbyService.deviceName} prihvatio SOS '
+                                  '${_formatTime(DateTime.now())}',
+                              isMe: true,
+                              time: DateTime.now(),
+                              senderName: 'SOS odgovor',
+                            ),
+                          );
+                        });
+                      },
+                      child: const Text(
+                        'PRIHVATI',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: SizedBox(
-                  height: 34,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.grey,
-                      foregroundColor: Colors.white,
-                      padding: EdgeInsets.zero,
-                    ),
-                    onPressed: _showRejectSosDialog,
-                    child: const Text(
-                      'ODBIJ',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: SizedBox(
+                    height: 34,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.grey,
+                        foregroundColor: Colors.white,
+                        padding: EdgeInsets.zero,
+                      ),
+                      onPressed: _showRejectSosDialog,
+                      child: const Text(
+                        'ODBIJ',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
           ],
         ],
       ),
@@ -851,49 +996,116 @@ _stopIncomingSosAlarm();
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-         Text(
-  'SOS poslan na $sosSentCount korisnika',
-  style: const TextStyle(
-    color: Colors.redAccent,
-    fontSize: 12,
-    fontWeight: FontWeight.bold,
-  ),
-),
-Text(
-  'Prihvatilo $sosAcceptedCount | Odbilo $sosRejectedCount',
-  style: const TextStyle(
-    color: Colors.blueAccent,
-    fontSize: 12,
-    fontWeight: FontWeight.bold,
-  ),
-),
-Text(
-  'Čeka odgovor $sosPendingCount/$sosSentCount',
-  style: const TextStyle(
-    color: Colors.amberAccent,
-    fontSize: 12,
-    fontWeight: FontWeight.bold,
-  ),
-),
+          Text(
+            'SOS poslan na $sosSentCount korisnika',
+            style: const TextStyle(
+              color: Colors.redAccent,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Text(
+            'Prihvatilo $sosAcceptedCount | Odbilo $sosRejectedCount',
+            style: const TextStyle(
+              color: Colors.blueAccent,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Text(
+            'Čeka odgovor $sosPendingCount/$sosSentCount',
+            style: const TextStyle(
+              color: Colors.amberAccent,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _devicePanel() {
-    if (nearbyService.connectedDevices.isEmpty &&
-        nearbyService.foundDevices.isEmpty &&
-        nearbyService.knownDevices.isEmpty) {
-      return const SizedBox.shrink();
-    }
+  Widget _networkStatusBar() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151A23),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.person, size: 16, color: Colors.white70),
+          const SizedBox(width: 4),
 
+          Text(
+            nearbyService.deviceName.isEmpty
+                ? 'Nije podešeno'
+                : nearbyService.deviceName,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+
+          const Spacer(),
+
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: Colors.green.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              '${nearbyService.connectedDevices.length} uređ.',
+              style: const TextStyle(
+                color: Colors.greenAccent,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+
+          const SizedBox(width: 8),
+
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: internetAvailable
+                  ? Colors.blue.withValues(alpha: 0.15)
+                  : Colors.orange.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              internetAvailable ? '🌐 ONLINE' : '📡 MESH',
+              style: TextStyle(
+                color: internetAvailable
+                    ? Colors.lightBlueAccent
+                    : Colors.orangeAccent,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _compactDeviceStatusPanel() {
     final seenNames = <String>{};
-    final notConnectedDevices =
-        nearbyService.foundDevices.entries.where((entry) {
-      final isConnectedById =
-          nearbyService.connectedDevices.containsKey(entry.key);
-      final isConnectedByName =
-          nearbyService.connectedDevices.values.contains(entry.value);
+
+    final directDevices = nearbyService.connectedDevices.entries.toList();
+
+    final foundDevices = nearbyService.foundDevices.entries.where((entry) {
+      final isConnectedById = nearbyService.connectedDevices.containsKey(
+        entry.key,
+      );
+      final isConnectedByName = nearbyService.connectedDevices.values.contains(
+        entry.value,
+      );
       final isDuplicateName = seenNames.contains(entry.value);
 
       if (!isConnectedById && !isConnectedByName && !isDuplicateName) {
@@ -906,101 +1118,115 @@ Text(
 
     final indirectDevices = nearbyService.knownDevices.entries.where((entry) {
       final isMe = entry.key == nearbyService.deviceId;
-      final isDirect =
-          nearbyService.connectedDevices.values.contains(entry.value);
+      final isDirect = nearbyService.connectedDevices.values.contains(
+        entry.value,
+      );
       return !isMe && !isDirect;
     }).toList();
 
+    final hasAnyDevice =
+        directDevices.isNotEmpty ||
+        foundDevices.isNotEmpty ||
+        indirectDevices.isNotEmpty;
+
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      color: const Color(0xFF111827),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (nearbyService.connectedDevices.isNotEmpty) ...[
-            const Text(
-              'Direktno povezani:',
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
+      height: 82,
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111827),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: hasAnyDevice
+          ? SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  ...directDevices.map(
+                    (entry) => _miniDeviceCard(
+                      name: entry.value,
+                      color: Colors.greenAccent,
+                      icon: Icons.smartphone,
+                      onTap: () =>
+                          _showConnectedDeviceOptions(entry.key, entry.value),
+                    ),
+                  ),
+                  ...foundDevices.map(
+                    (entry) => _miniDeviceCard(
+                      name: entry.value,
+                      color: Colors.amberAccent,
+                      icon: Icons.smartphone,
+                      onTap: () async {
+                        await nearbyService.connectToDevice(entry.key);
+                      },
+                    ),
+                  ),
+                  ...indirectDevices.map(
+                    (entry) => _miniDeviceCard(
+                      name: entry.value,
+                      color: Colors.lightBlueAccent,
+                      icon: Icons.smartphone,
+                      onTap: () {
+                        setState(() {
+                          selectedPrivateEndpointId = null;
+                          selectedPrivateDeviceId = entry.key;
+                          selectedPrivateDeviceName = entry.value;
+                          _privateMessages.clear();
+                        });
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : const Center(
+              child: Text(
+                'Nema uređaja u blizini',
+                style: TextStyle(
+                  color: Colors.white54,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: nearbyService.connectedDevices.entries.map((entry) {
-                return GestureDetector(
-                  onTap: () {
-                    _showConnectedDeviceOptions(entry.key, entry.value);
-                  },
-                  child: _deviceChip(entry.value, Colors.greenAccent),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 10),
-          ],
+    );
+  }
 
-          if (notConnectedDevices.isNotEmpty) ...[
-            const Text(
-              'Pronađeni, nisu povezani:',
+  Widget _miniDeviceCard({
+    required String name,
+    required Color color,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 76,
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withValues(alpha: 0.65)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 22),
+            const SizedBox(height: 3),
+            Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
               style: TextStyle(
-                color: Colors.white70,
-                fontSize: 12,
+                color: color,
+                fontSize: 10,
                 fontWeight: FontWeight.bold,
               ),
             ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: notConnectedDevices.map((entry) {
-                return GestureDetector(
-                  onTap: () async {
-                    await nearbyService.connectToDevice(entry.key);
-                  },
-                  child: _deviceChip(entry.value, Colors.amberAccent),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 10),
           ],
-
-          if (indirectDevices.isNotEmpty) ...[
-            const Text(
-              'Poznati preko mesh mreže:',
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-             children: indirectDevices.map((entry) {
-  return GestureDetector(
-    onTap: () {
-      setState(() {
-        selectedPrivateEndpointId = null;
-        selectedPrivateDeviceId = entry.key;
-        selectedPrivateDeviceName = entry.value;
-        _privateMessages.clear();
-      });
-    },
-    child: _deviceChip(
-  entry.value,
-  Colors.blueAccent,
-  selected: selectedPrivateDeviceId == entry.key,
-),
-  );
-}).toList(),
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }
@@ -1009,7 +1235,10 @@ Text(
     return Expanded(
       child: Column(
         children: [
+          _pinnedSosCard(),
+
           if (incomingSosActive) _incomingSosPanel(),
+
           Expanded(
             child: ListView.builder(
               controller: _scrollController,
@@ -1019,8 +1248,9 @@ Text(
                 final msg = _messages[index];
 
                 return Align(
-                  alignment:
-                      msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
+                  alignment: msg.isMe
+                      ? Alignment.centerRight
+                      : Alignment.centerLeft,
                   child: Container(
                     margin: const EdgeInsets.symmetric(vertical: 5),
                     padding: const EdgeInsets.all(12),
@@ -1130,8 +1360,9 @@ Text(
                 final msg = _privateMessages[index];
 
                 return Align(
-                  alignment:
-                      msg.isMe ? Alignment.centerRight : Alignment.centerLeft,
+                  alignment: msg.isMe
+                      ? Alignment.centerRight
+                      : Alignment.centerLeft,
                   child: Container(
                     margin: const EdgeInsets.symmetric(vertical: 3),
                     padding: const EdgeInsets.all(9),
@@ -1146,10 +1377,7 @@ Text(
                     ),
                     child: Text(
                       msg.text,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                      ),
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
                     ),
                   ),
                 );
@@ -1173,10 +1401,10 @@ Text(
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
                 hintText: incomingSosActive
-    ? 'Prvo reaguj na SOS poruku...'
-    : selectedPrivateDeviceName == null
-        ? 'Unesi mesh poruku...'
-        : 'Privatna poruka za $selectedPrivateDeviceName...',
+                    ? 'Prvo reaguj na SOS poruku...'
+                    : selectedPrivateDeviceName == null
+                    ? 'Unesi mesh poruku...'
+                    : 'Privatna poruka za $selectedPrivateDeviceName...',
                 hintStyle: TextStyle(
                   color: Colors.white.withValues(alpha: 0.5),
                 ),
@@ -1192,10 +1420,10 @@ Text(
                 ),
               ),
               onSubmitted: (_) {
-  if (!incomingSosActive) {
-    _sendMessage();
-  }
-},
+                if (!incomingSosActive) {
+                  _sendMessage();
+                }
+              },
             ),
           ),
           const SizedBox(width: 8),
@@ -1287,102 +1515,88 @@ Text(
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          if (showNameEditor)
-            Container(
-              padding: const EdgeInsets.all(12),
-              color: const Color(0xFF151A23),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _nameController,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        hintText: 'Unesi ime uređaja...',
-                        hintStyle: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.5),
-                        ),
-                        filled: true,
-                        fillColor: const Color(0xFF0E1117),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide.none,
+          Column(
+            children: [
+              if (showNameEditor)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  color: const Color(0xFF151A23),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _nameController,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            hintText: 'Unesi ime uređaja...',
+                            hintStyle: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.5),
+                            ),
+                            filled: true,
+                            fillColor: const Color(0xFF0E1117),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(14),
+                              borderSide: BorderSide.none,
+                            ),
+                          ),
                         ),
                       ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: _saveDeviceName,
+                        child: const Text('OK'),
+                      ),
+                    ],
+                  ),
+                ),
+              _networkStatusBar(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    _sosButton(),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: sosActive
+                          ? _sosStatusPanel()
+                          : _compactDeviceStatusPanel(),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: _saveDeviceName,
-                    child: const Text('OK'),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
 
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-            child: Row(
-              children: [
-                _sosButton(),
-                const SizedBox(width: 10),
-                if (sosActive) Expanded(child: _sosStatusPanel()),
-              ],
-            ),
+              _chatArea(),
+
+              if (_logs.isNotEmpty)
+                ExpansionTile(
+                  collapsedBackgroundColor: const Color(0xFF151A23),
+                  backgroundColor: const Color(0xFF151A23),
+                  title: const Text(
+                    'Mesh log',
+                    style: TextStyle(color: Colors.white, fontSize: 13),
+                  ),
+                  children: _logs.take(6).map((log) {
+                    return ListTile(
+                      dense: true,
+                      title: Text(
+                        log,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.75),
+                          fontSize: 11,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+
+              _privateChatPanel(),
+              _inputBar(),
+            ],
           ),
-
-          if (connectedCount == 0)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(8),
-              color: Colors.orange.withValues(alpha: 0.15),
-              child: const Text(
-                'Nema povezanih uređaja. Klikni Auto Connect na oba telefona.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.orangeAccent, fontSize: 12),
-              ),
-            )
-          else
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(8),
-              color: Colors.green.withValues(alpha: 0.15),
-              child: Text(
-                'Povezano uređaja: $connectedCount',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.greenAccent, fontSize: 12),
-              ),
-            ),
-
-          _devicePanel(),
-          _chatArea(),
-
-          if (_logs.isNotEmpty)
-            ExpansionTile(
-              collapsedBackgroundColor: const Color(0xFF151A23),
-              backgroundColor: const Color(0xFF151A23),
-              title: const Text(
-                'Mesh log',
-                style: TextStyle(color: Colors.white, fontSize: 13),
-              ),
-              children: _logs.take(6).map((log) {
-                return ListTile(
-                  dense: true,
-                  title: Text(
-                    log,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.75),
-                      fontSize: 11,
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-
-          _privateChatPanel(),
-          _inputBar(),
+          _sosModal(),
         ],
       ),
     );

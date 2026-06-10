@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
-
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -25,12 +25,8 @@ class NearbyService {
 
   Function(String log)? onLog;
 
-  Function(
-    String message,
-    String endpointId,
-    String senderName,
-    String type,
-  )? onMessageReceived;
+  Function(String message, String endpointId, String senderName, String type)?
+  onMessageReceived;
 
   Function()? onDevicesChanged;
 
@@ -111,6 +107,12 @@ class NearbyService {
     }
   }
 
+  Future<bool> hasInternetConnection() async {
+    final connectivityResult = await Connectivity().checkConnectivity();
+
+    return !connectivityResult.contains(ConnectivityResult.none);
+  }
+
   Future<void> setDeviceName(String name) async {
     final prefs = await SharedPreferences.getInstance();
     deviceName = name.trim();
@@ -157,7 +159,9 @@ class NearbyService {
         onDisconnected: _onDisconnected,
       );
 
-      onLog?.call(result ? 'Advertising pokrenut' : 'Advertising nije pokrenut');
+      onLog?.call(
+        result ? 'Advertising pokrenut' : 'Advertising nije pokrenut',
+      );
     } catch (e) {
       onLog?.call('Greška advertising: $e');
     }
@@ -224,7 +228,8 @@ class NearbyService {
 
       processedMessages.add(meshMessage.messageId);
 
-      if (meshMessage.senderId.isNotEmpty && meshMessage.senderName.isNotEmpty) {
+      if (meshMessage.senderId.isNotEmpty &&
+          meshMessage.senderName.isNotEmpty) {
         knownDevices[meshMessage.senderId] = meshMessage.senderName;
 
         onLog?.call(
@@ -288,12 +293,7 @@ class NearbyService {
     } catch (e) {
       onLog?.call('Primljena stara/string poruka: $rawData');
 
-      onMessageReceived?.call(
-        rawData,
-        endpointId,
-        endpointId,
-        'group',
-      );
+      onMessageReceived?.call(rawData, endpointId, endpointId, 'group');
     }
   }
 
@@ -463,7 +463,9 @@ class NearbyService {
 
     for (final endpointId in connectedDevices.keys) {
       try {
-        onLog?.call('SOS slanje ka: ${connectedDevices[endpointId]} | $endpointId');
+        onLog?.call(
+          'SOS slanje ka: ${connectedDevices[endpointId]} | $endpointId',
+        );
 
         await Nearby().sendBytesPayload(
           endpointId,
@@ -479,9 +481,7 @@ class NearbyService {
     onLog?.call('SOS poslat: $sosId');
   }
 
-  Future<void> sendSosCancel({
-    required String sosId,
-  }) async {
+  Future<void> sendSosCancel({required String sosId}) async {
     if (deviceName.isEmpty) {
       onLog?.call('Prvo unesi ime uređaja.');
       return;
