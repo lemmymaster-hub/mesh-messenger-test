@@ -68,7 +68,7 @@ Future<void> sendHello(String endpointId) async {
     text: '',
     type: 'hello',
     hopCount: 0,
-    maxHops: 1,
+    maxHops: 5,
     timestamp: DateTime.now().millisecondsSinceEpoch,
   );
 
@@ -226,13 +226,29 @@ Future<void> sendHello(String endpointId) async {
 if (meshMessage.senderId.isNotEmpty &&
     meshMessage.senderName.isNotEmpty) {
   knownDevices[meshMessage.senderId] = meshMessage.senderName;
-  endpointDeviceIds[endpointId] = meshMessage.senderId;
-  connectedDevices[endpointId] = meshMessage.senderName;
+onLog?.call(
+  'Poznat mesh uređaj: ${meshMessage.senderName} | ${meshMessage.senderId.substring(0, 8)} | hop ${meshMessage.hopCount}',
+);
+  // Samo direktna poruka sa hopCount 0 smije mijenjati endpoint mapu.
+  // Ako je poruka došla preko relay-a, endpointId je zapravo posrednik.
+  if (meshMessage.hopCount == 0) {
+    endpointDeviceIds[endpointId] = meshMessage.senderId;
+    connectedDevices[endpointId] = meshMessage.senderName;
+  }
+
   onDevicesChanged?.call();
 }
 
 if (meshMessage.type == 'hello') {
-  onLog?.call('HELLO primljen od: ${meshMessage.senderName}');
+  onLog?.call(
+    'HELLO primljen od: ${meshMessage.senderName} | hop ${meshMessage.hopCount}',
+  );
+
+  _relayMessage(
+    meshMessage,
+    endpointId,
+  );
+
   return;
 }
       final isGroupMessage = meshMessage.type == 'group';
@@ -262,9 +278,13 @@ if (meshMessage.senderName.isNotEmpty) {
   meshMessage.type,
 );
       } else {
-        onLog?.call(
-          'Relay only: ${meshMessage.messageId}',
-        );
+       final receiverShort = meshMessage.receiverId.length >= 8
+    ? meshMessage.receiverId.substring(0, 8)
+    : meshMessage.receiverId;
+
+onLog?.call(
+  'Relay only: ${meshMessage.type} za $receiverShort | hop ${meshMessage.hopCount}',
+);
       }
 
       _relayMessage(
@@ -501,7 +521,9 @@ Future<void> sendPrivateMessage({
     );
   }
 
-  onLog?.call('Privatna poruka poslata: ${meshMessage.messageId}');
+ onLog?.call(
+  'Privatna poruka poslata za receiverId: $receiverDeviceId | ${meshMessage.messageId}',
+);
 }
   Future<void> sendMessage(String text) async {
     if (deviceName.isEmpty) {

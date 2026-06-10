@@ -42,24 +42,38 @@ class _ChatScreenState extends State<ChatScreen> {
 
   String? activeSosId;
 
-  Widget _deviceChip(String name, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color),
+  Widget _deviceChip(String name, Color color, {bool selected = false}) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    decoration: BoxDecoration(
+      color: selected
+          ? color.withValues(alpha: 0.28)
+          : color.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(
+        color: selected ? Colors.white : color,
+        width: selected ? 2 : 1,
       ),
-      child: Text(
-        name,
-        style: TextStyle(
-          color: color,
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-        ),
+      boxShadow: selected
+          ? [
+              BoxShadow(
+                color: color.withValues(alpha: 0.55),
+                blurRadius: 12,
+                spreadRadius: 2,
+              ),
+            ]
+          : [],
+    ),
+    child: Text(
+      name,
+      style: TextStyle(
+        color: selected ? Colors.white : color,
+        fontSize: 12,
+        fontWeight: FontWeight.bold,
       ),
-    );
-  }
+    ),
+  );
+}
 
   void _showConnectedDeviceOptions(String endpointId, String name) {
     showModalBottomSheet(
@@ -835,9 +849,23 @@ Text(
             Wrap(
               spacing: 8,
               runSpacing: 6,
-              children: indirectDevices.map((entry) {
-                return _deviceChip(entry.value, Colors.blueAccent);
-              }).toList(),
+             children: indirectDevices.map((entry) {
+  return GestureDetector(
+    onTap: () {
+      setState(() {
+        selectedPrivateEndpointId = null;
+        selectedPrivateDeviceId = entry.key;
+        selectedPrivateDeviceName = entry.value;
+        _privateMessages.clear();
+      });
+    },
+    child: _deviceChip(
+  entry.value,
+  Colors.blueAccent,
+  selected: selectedPrivateDeviceId == entry.key,
+),
+  );
+}).toList(),
             ),
           ],
         ],
