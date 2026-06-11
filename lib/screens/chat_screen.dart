@@ -4,6 +4,7 @@ import 'dart:async';
 import '../models/chat_message.dart';
 import '../services/nearby_service.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'map/mesh_map_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -1508,6 +1509,21 @@ class _ChatScreenState extends State<ChatScreen>
             onPressed: nearbyService.startDiscovery,
             icon: const Icon(Icons.search, color: Colors.white),
           ),
+          IconButton(
+  tooltip: 'Mapa',
+  onPressed: () {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const MeshMapScreen(),
+      ),
+    );
+  },
+  icon: const Icon(
+    Icons.map,
+    color: Colors.white,
+  ),
+),
           IconButton(
             tooltip: 'Stop',
             onPressed: nearbyService.stopAll,
