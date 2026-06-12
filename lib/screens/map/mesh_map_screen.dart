@@ -5,9 +5,14 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
+import 'package:geolocator/geolocator.dart';
 class MeshMapScreen extends StatefulWidget {
-  const MeshMapScreen({super.key});
+  final Map<String, Map<String, dynamic>> meshUserLocations;
+
+  const MeshMapScreen({
+    super.key,
+    this.meshUserLocations = const {},
+  });
 
   @override
   State<MeshMapScreen> createState() => _MeshMapScreenState();
@@ -19,15 +24,52 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
 
   LatLng _mapCenter = const LatLng(43.8167, 18.35);
   double _currentZoom = 12;
+  LatLng? _myLocation;
   bool _isDownloadingMap = false;
   String? _offlineAreaName;
   List<Map<String, dynamic>> _offlineAreas = [];
+Future<void> _loadMyLocation() async {
+  try {
+    LocationPermission permission = await Geolocator.checkPermission();
 
-  @override
-  void initState() {
-    super.initState();
-    _loadOfflineAreas();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      return;
+    }
+
+    final position = await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+    );
+
+    final myPosition = LatLng(
+      position.latitude,
+      position.longitude,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _myLocation = myPosition;
+      _mapCenter = myPosition;
+      _currentZoom = 15;
+    });
+
+    _mapController.move(myPosition, 15);
+  } catch (_) {
+    // Ako GPS nije dostupan, ostaje fallback Sarajevo/Istočno Sarajevo.
   }
+}
+  @override
+void initState() {
+  super.initState();
+
+  _loadOfflineAreas();
+  _loadMyLocation();
+}
 
   @override
   void dispose() {
@@ -438,25 +480,105 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                   userAgentPackageName: 'com.example.mesh_messenger_test',
                 ),
+                if (_myLocation != null)
+  MarkerLayer(
+    markers: [
+      Marker(
+        point: _myLocation!,
+        width: 60,
+        height: 60,
+        child: const Icon(
+          Icons.my_location,
+          color: Colors.blueAccent,
+          size: 36,
+        ),
+      ),
+    ],
+  ),
+  if (widget.meshUserLocations.isNotEmpty)
+  MarkerLayer(
+    markers: widget.meshUserLocations.entries.map((entry) {
+      final lat = entry.value['lat'];
+      final lng = entry.value['lng'];
+
+      return Marker(
+        point: LatLng(lat, lng),
+        width: 90,
+        height: 70,
+        child: Column(
+          children: [
+            const Icon(
+              Icons.location_on,
+              color: Colors.greenAccent,
+              size: 34,
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 4,
+                vertical: 2,
+              ),
+              decoration: BoxDecoration(
+                color: Colors.black87,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                entry.key,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }).toList(),
+  ),
               ],
             ),
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _downloadCurrentArea,
-        icon: _isDownloadingMap
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
-              )
-            : const Icon(Icons.download),
-        label: Text(_isDownloadingMap ? 'Preuzimanje...' : 'Skini mapu'),
+      floatingActionButton: Column(
+  mainAxisSize: MainAxisSize.min,
+  crossAxisAlignment: CrossAxisAlignment.end,
+  children: [
+
+    FloatingActionButton(
+      heroTag: 'my_location',
+      backgroundColor: Colors.blueAccent,
+      onPressed: () {
+        if (_myLocation == null) return;
+
+        _mapController.move(_myLocation!, 15);
+      },
+      child: const Icon(Icons.my_location),
+    ),
+
+    const SizedBox(height: 10),
+
+    FloatingActionButton.extended(
+      heroTag: 'download_map',
+      onPressed: _downloadCurrentArea,
+      icon: _isDownloadingMap
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            )
+          : const Icon(Icons.download),
+      label: Text(
+        _isDownloadingMap
+            ? 'Preuzimanje...'
+            : 'Skini mapu',
       ),
+    ),
+  ],
+),
+        
     );
   }
 }

@@ -26,7 +26,7 @@ class _ChatScreenState extends State<ChatScreen>
   final List<ChatMessage> _messages = [];
   final List<String> _logs = [];
   final List<ChatMessage> _privateMessages = [];
-
+  final Map<String, Map<String, dynamic>> meshUserLocations = {};
   bool showNameEditor = false;
 
   String? selectedPrivateDeviceId;
@@ -39,6 +39,7 @@ class _ChatScreenState extends State<ChatScreen>
   bool internetAvailable = false;
   Timer? sosAlarmRepeatTimer;
   Timer? sosAlarmStopTimer;
+  Timer? locationBroadcastTimer;
   String incomingSosSender = '';
   String incomingSosMessage = '';
   String? incomingSosId;
@@ -128,6 +129,7 @@ class _ChatScreenState extends State<ChatScreen>
         await nearbyService.startAdvertising();
         await Future.delayed(const Duration(seconds: 1));
         await nearbyService.startDiscovery();
+        _startLocationBroadcast();
       }
 
       setState(() {});
@@ -137,6 +139,29 @@ class _ChatScreenState extends State<ChatScreen>
       if (!mounted) return;
       setState(() {
         _logs.insert(0, log);
+      });
+    };
+
+    nearbyService.onLocationReceived = (
+      deviceId,
+      deviceName,
+      latitude,
+      longitude,
+      timestamp,
+    ) {
+      if (!mounted) return;
+
+      setState(() {
+        meshUserLocations[deviceName] = {
+          'lat': latitude,
+          'lng': longitude,
+          'time': timestamp,
+        };
+
+        _logs.insert(
+          0,
+          '📍 Lokacija primljena od $deviceName | $latitude, $longitude',
+        );
       });
     };
 
@@ -237,9 +262,14 @@ class _ChatScreenState extends State<ChatScreen>
     };
 
     nearbyService.onDevicesChanged = () {
-      if (!mounted) return;
-      setState(() {});
-    };
+  if (!mounted) return;
+
+  if (nearbyService.connectedDevices.isNotEmpty) {
+    _startLocationBroadcast();
+  }
+
+  setState(() {});
+};
   }
 
   void _addSystemMessage(String text) {
@@ -474,6 +504,50 @@ class _ChatScreenState extends State<ChatScreen>
       );
     } else {
       await nearbyService.sendMessage(text);
+    }
+  }
+
+
+  void _startLocationBroadcast() {
+    locationBroadcastTimer?.cancel();
+
+    _broadcastMyLocation();
+
+    locationBroadcastTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _broadcastMyLocation(),
+    );
+  }
+
+  Future<void> _broadcastMyLocation() async {
+    if (nearbyService.connectedDevices.isEmpty) return;
+
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      await nearbyService.sendLocationUpdate(
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _logs.insert(0, 'Greška slanja lokacije: $e');
+      });
     }
   }
 
@@ -1447,6 +1521,7 @@ class _ChatScreenState extends State<ChatScreen>
     _scrollController.dispose();
     _sosPulseController.dispose();
     _sosAudioPlayer.dispose();
+    locationBroadcastTimer?.cancel();
     nearbyService.dispose();
     super.dispose();
   }
@@ -1515,7 +1590,9 @@ class _ChatScreenState extends State<ChatScreen>
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => const MeshMapScreen(),
+        builder: (_) => MeshMapScreen(
+  meshUserLocations: meshUserLocations,
+),
       ),
     );
   },
@@ -1524,6 +1601,7 @@ class _ChatScreenState extends State<ChatScreen>
     color: Colors.white,
   ),
 ),
+
           IconButton(
             tooltip: 'Stop',
             onPressed: nearbyService.stopAll,

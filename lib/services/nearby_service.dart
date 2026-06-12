@@ -28,6 +28,15 @@ class NearbyService {
   Function(String message, String endpointId, String senderName, String type)?
   onMessageReceived;
 
+  Function(
+    String deviceId,
+    String deviceName,
+    double latitude,
+    double longitude,
+    int timestamp,
+  )?
+  onLocationReceived;
+
   Function()? onDevicesChanged;
 
   NearbyService();
@@ -250,6 +259,32 @@ class NearbyService {
         onLog?.call(
           'HELLO primljen od: ${meshMessage.senderName} | hop ${meshMessage.hopCount}',
         );
+
+        _relayMessage(meshMessage, endpointId);
+        return;
+      }
+
+      if (meshMessage.type == 'location') {
+        final isMyOwnLocation = meshMessage.senderId == deviceId;
+
+        if (!isMyOwnLocation &&
+            meshMessage.latitude != null &&
+            meshMessage.longitude != null) {
+          onLog?.call(
+            'Lokacija primljena: ${meshMessage.senderName} | '
+            '${meshMessage.latitude}, ${meshMessage.longitude}',
+          );
+
+          onLocationReceived?.call(
+            meshMessage.senderId,
+            meshMessage.senderName.isEmpty
+                ? _shortId(meshMessage.senderId)
+                : meshMessage.senderName,
+            meshMessage.latitude!,
+            meshMessage.longitude!,
+            meshMessage.timestamp,
+          );
+        }
 
         _relayMessage(meshMessage, endpointId);
         return;
@@ -611,6 +646,58 @@ class NearbyService {
     }
 
     onLog?.call('Mesh poruka poslata: ${meshMessage.messageId}');
+  }
+
+  Future<void> sendLocationUpdate({
+    required double latitude,
+    required double longitude,
+  }) async {
+    if (deviceName.isEmpty) {
+      onLog?.call('Prvo unesi ime uređaja.');
+      return;
+    }
+
+    if (deviceId.isEmpty) {
+      await loadOrCreateDeviceId();
+    }
+
+    if (connectedDevices.isEmpty) {
+      onLog?.call('Nema povezanih uređaja za slanje lokacije');
+      return;
+    }
+
+    final meshMessage = MeshMessage(
+      messageId: uuid.v4(),
+      senderId: deviceId,
+      senderName: deviceName,
+      receiverId: 'ALL',
+      text: 'LOCATION_UPDATE',
+      type: 'location',
+      hopCount: 0,
+      maxHops: 5,
+      timestamp: DateTime.now().millisecondsSinceEpoch,
+      latitude: latitude,
+      longitude: longitude,
+    );
+
+    processedMessages.add(meshMessage.messageId);
+    final encodedMessage = meshMessage.encode();
+
+    for (final endpointId in connectedDevices.keys) {
+      try {
+        await Nearby().sendBytesPayload(
+          endpointId,
+          Uint8List.fromList(utf8.encode(encodedMessage)),
+        );
+
+        onLog?.call(
+          'Lokacija poslata ka: ${connectedDevices[endpointId]} | '
+          '$latitude, $longitude',
+        );
+      } catch (e) {
+        onLog?.call('Greška slanja lokacije ka $endpointId: $e');
+      }
+    }
   }
 
   Future<void> stopAll() async {
