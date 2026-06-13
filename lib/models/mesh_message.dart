@@ -4,9 +4,10 @@ class MeshMessage {
   final String messageId;
   final String senderId;
   final String senderName;
+  final String senderRole;
   final String receiverId;
   final String text;
-  final String type; // group, private, hello, sos, sos_accept, sos_reject, sos_cancel
+  final String type; // group, private, hello, location, sos, sos_accept, sos_reject, sos_cancel
   final int hopCount;
   final int maxHops;
   final int timestamp;
@@ -20,6 +21,7 @@ class MeshMessage {
     required this.messageId,
     required this.senderId,
     required this.senderName,
+    this.senderRole = 'Volonter',
     required this.receiverId,
     required this.text,
     required this.type,
@@ -37,6 +39,7 @@ class MeshMessage {
       'messageId': messageId,
       'senderId': senderId,
       'senderName': senderName,
+      'senderRole': senderRole,
       'receiverId': receiverId,
       'text': text,
       'type': type,
@@ -55,6 +58,7 @@ class MeshMessage {
       messageId: json['messageId'] ?? '',
       senderId: json['senderId'] ?? '',
       senderName: json['senderName'] ?? '',
+      senderRole: json['senderRole'] ?? 'Volonter',
       receiverId: json['receiverId'] ?? 'ALL',
       text: json['text'] ?? '',
       type: json['type'] ?? 'group',

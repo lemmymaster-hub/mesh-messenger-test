@@ -16,11 +16,13 @@ class NearbyService {
   final String serviceId = 'bsl.mesh.test';
 
   String deviceName = '';
+  String deviceRole = 'Volonter';
   String deviceId = '';
 
   final Map<String, String> foundDevices = {};
   final Map<String, String> connectedDevices = {};
   final Map<String, String> knownDevices = {};
+  final Map<String, String> knownDeviceRoles = {};
   final Map<String, String> endpointDeviceIds = {};
 
   Function(String log)? onLog;
@@ -31,6 +33,7 @@ class NearbyService {
   Function(
     String deviceId,
     String deviceName,
+    String deviceRole,
     double latitude,
     double longitude,
     int timestamp,
@@ -77,6 +80,7 @@ class NearbyService {
       messageId: uuid.v4(),
       senderId: deviceId,
       senderName: deviceName,
+      senderRole: deviceRole,
       receiverId: 'ALL',
       text: '',
       type: 'hello',
@@ -99,6 +103,12 @@ class NearbyService {
     return deviceName.isEmpty ? null : deviceName;
   }
 
+  Future<String> loadDeviceRole() async {
+    final prefs = await SharedPreferences.getInstance();
+    deviceRole = prefs.getString('mesh_device_role') ?? 'Volonter';
+    return deviceRole;
+  }
+
   Future<void> loadOrCreateDeviceId() async {
     final prefs = await SharedPreferences.getInstance();
     deviceId = prefs.getString('mesh_device_id') ?? '';
@@ -113,6 +123,7 @@ class NearbyService {
 
     if (deviceName.isNotEmpty && deviceId.isNotEmpty) {
       knownDevices[deviceId] = deviceName;
+      knownDeviceRoles[deviceId] = deviceRole;
     }
   }
 
@@ -123,13 +134,28 @@ class NearbyService {
   }
 
   Future<void> setDeviceName(String name) async {
+    await setDeviceProfile(name: name, role: deviceRole);
+  }
+
+  Future<void> setDeviceRole(String role) async {
+    await setDeviceProfile(name: deviceName, role: role);
+  }
+
+  Future<void> setDeviceProfile({
+    required String name,
+    required String role,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
+
     deviceName = name.trim();
+    deviceRole = role.trim().isEmpty ? 'Volonter' : role.trim();
 
     await prefs.setString('mesh_device_name', deviceName);
+    await prefs.setString('mesh_device_role', deviceRole);
 
     if (deviceId.isNotEmpty && deviceName.isNotEmpty) {
       knownDevices[deviceId] = deviceName;
+      knownDeviceRoles[deviceId] = deviceRole;
       onDevicesChanged?.call();
     }
   }
@@ -147,6 +173,7 @@ class NearbyService {
 
     if (deviceId.isNotEmpty && deviceName.isNotEmpty) {
       knownDevices[deviceId] = deviceName;
+      knownDeviceRoles[deviceId] = deviceRole;
     }
   }
 
@@ -240,9 +267,10 @@ class NearbyService {
       if (meshMessage.senderId.isNotEmpty &&
           meshMessage.senderName.isNotEmpty) {
         knownDevices[meshMessage.senderId] = meshMessage.senderName;
+        knownDeviceRoles[meshMessage.senderId] = meshMessage.senderRole;
 
         onLog?.call(
-          'Poznat mesh uređaj: ${meshMessage.senderName} | ${_shortId(meshMessage.senderId)} | hop ${meshMessage.hopCount}',
+          'Poznat mesh uređaj: ${meshMessage.senderName} (${meshMessage.senderRole}) | ${_shortId(meshMessage.senderId)} | hop ${meshMessage.hopCount}',
         );
 
         // Samo direktna poruka sa hopCount 0 smije mijenjati endpoint mapu.
@@ -271,7 +299,7 @@ class NearbyService {
             meshMessage.latitude != null &&
             meshMessage.longitude != null) {
           onLog?.call(
-            'Lokacija primljena: ${meshMessage.senderName} | '
+            'Lokacija primljena: ${meshMessage.senderName} (${meshMessage.senderRole}) | '
             '${meshMessage.latitude}, ${meshMessage.longitude}',
           );
 
@@ -280,6 +308,9 @@ class NearbyService {
             meshMessage.senderName.isEmpty
                 ? _shortId(meshMessage.senderId)
                 : meshMessage.senderName,
+            meshMessage.senderRole.isEmpty
+                ? 'Volonter'
+                : meshMessage.senderRole,
             meshMessage.latitude!,
             meshMessage.longitude!,
             meshMessage.timestamp,
@@ -347,6 +378,7 @@ class NearbyService {
       messageId: originalMessage.messageId,
       senderId: originalMessage.senderId,
       senderName: originalMessage.senderName,
+      senderRole: originalMessage.senderRole,
       receiverId: originalMessage.receiverId,
       text: originalMessage.text,
       type: originalMessage.type,
@@ -423,6 +455,7 @@ class NearbyService {
       messageId: uuid.v4(),
       senderId: deviceId,
       senderName: deviceName,
+      senderRole: deviceRole,
       receiverId: 'ALL',
       text: text,
       type: responseType,
@@ -482,6 +515,7 @@ class NearbyService {
       messageId: sosId,
       senderId: deviceId,
       senderName: deviceName,
+      senderRole: deviceRole,
       receiverId: 'ALL',
       text: sosText,
       type: 'sos',
@@ -535,6 +569,7 @@ class NearbyService {
       messageId: uuid.v4(),
       senderId: deviceId,
       senderName: deviceName,
+      senderRole: deviceRole,
       receiverId: 'ALL',
       text: 'Pomoć pružena ugroženoj osobi.',
       type: 'sos_cancel',
@@ -585,6 +620,7 @@ class NearbyService {
       messageId: uuid.v4(),
       senderId: deviceId,
       senderName: deviceName,
+      senderRole: deviceRole,
       receiverId: receiverDeviceId,
       text: text,
       type: 'private',
@@ -627,6 +663,7 @@ class NearbyService {
       messageId: uuid.v4(),
       senderId: deviceId,
       senderName: deviceName,
+      senderRole: deviceRole,
       receiverId: 'ALL',
       text: text,
       type: 'group',
@@ -670,6 +707,7 @@ class NearbyService {
       messageId: uuid.v4(),
       senderId: deviceId,
       senderName: deviceName,
+      senderRole: deviceRole,
       receiverId: 'ALL',
       text: 'LOCATION_UPDATE',
       type: 'location',

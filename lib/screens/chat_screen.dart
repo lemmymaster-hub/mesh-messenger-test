@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:async';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/chat_message.dart';
 import '../services/nearby_service.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -28,6 +29,17 @@ class _ChatScreenState extends State<ChatScreen>
   final List<ChatMessage> _privateMessages = [];
   final Map<String, Map<String, dynamic>> meshUserLocations = {};
   bool showNameEditor = false;
+  String selectedRole = 'Volonter';
+
+  final List<String> availableRoles = [
+    'Komandant',
+    'Operater',
+    'Vatrogasac',
+    'Policija',
+    'GSS',
+    'CK',
+    'Volonter',
+  ];
 
   String? selectedPrivateDeviceId;
   String? selectedPrivateDeviceName;
@@ -113,6 +125,7 @@ class _ChatScreenState extends State<ChatScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final savedName = await nearbyService.loadDeviceName();
       await nearbyService.loadOrCreateDeviceId();
+      await _loadSelectedRole();
       internetAvailable = await nearbyService.hasInternetConnection();
       if (!mounted) return;
 
@@ -122,7 +135,9 @@ class _ChatScreenState extends State<ChatScreen>
         _addSystemMessage('Mesh chat spreman.');
         showNameEditor = true;
       } else {
-        _addSystemMessage('Uređaj: ${nearbyService.deviceName}');
+        _addSystemMessage(
+          'Uređaj: ${nearbyService.deviceName} ($selectedRole)',
+        );
         _addSystemMessage('ID: ${nearbyService.deviceId.substring(0, 8)}');
         _addSystemMessage('Mesh chat spreman.');
 
@@ -142,28 +157,24 @@ class _ChatScreenState extends State<ChatScreen>
       });
     };
 
-    nearbyService.onLocationReceived = (
-      deviceId,
-      deviceName,
-      latitude,
-      longitude,
-      timestamp,
-    ) {
-      if (!mounted) return;
+    nearbyService.onLocationReceived =
+        (deviceId, deviceName, deviceRole, latitude, longitude, timestamp) {
+          if (!mounted) return;
 
-      setState(() {
-        meshUserLocations[deviceName] = {
-          'lat': latitude,
-          'lng': longitude,
-          'time': timestamp,
+          setState(() {
+            meshUserLocations[deviceName] = {
+              'role': deviceRole,
+              'lat': latitude,
+              'lng': longitude,
+              'time': timestamp,
+            };
+
+            _logs.insert(
+              0,
+              '📍 Lokacija primljena od $deviceName | $latitude, $longitude',
+            );
+          });
         };
-
-        _logs.insert(
-          0,
-          '📍 Lokacija primljena od $deviceName | $latitude, $longitude',
-        );
-      });
-    };
 
     nearbyService.onMessageReceived = (message, endpointId, senderName, type) {
       if (!mounted) return;
@@ -262,14 +273,14 @@ class _ChatScreenState extends State<ChatScreen>
     };
 
     nearbyService.onDevicesChanged = () {
-  if (!mounted) return;
+      if (!mounted) return;
 
-  if (nearbyService.connectedDevices.isNotEmpty) {
-    _startLocationBroadcast();
-  }
+      if (nearbyService.connectedDevices.isNotEmpty) {
+        _startLocationBroadcast();
+      }
 
-  setState(() {});
-};
+      setState(() {});
+    };
   }
 
   void _addSystemMessage(String text) {
@@ -367,17 +378,48 @@ class _ChatScreenState extends State<ChatScreen>
     _sosAudioPlayer.stop();
   }
 
+  Future<void> _loadSelectedRole() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedRole = prefs.getString('mesh_device_role');
+
+    if (savedRole != null && availableRoles.contains(savedRole)) {
+      selectedRole = savedRole;
+    }
+
+    try {
+      (nearbyService as dynamic).deviceRole = selectedRole;
+    } catch (_) {}
+  }
+
+  Future<void> _saveSelectedRole(String role) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('mesh_device_role', role);
+
+    try {
+      final dynamic service = nearbyService;
+      await service.setDeviceRole(role);
+    } catch (_) {
+      try {
+        (nearbyService as dynamic).deviceRole = role;
+      } catch (_) {}
+    }
+  }
+
   Future<void> _saveDeviceName() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) return;
 
     await nearbyService.setDeviceName(name);
+    await _saveSelectedRole(selectedRole);
 
     if (!mounted) return;
 
     setState(() {
       showNameEditor = false;
-      _addSystemMessage('Ime uređaja: ${nearbyService.deviceName}');
+      _addSystemMessage(
+        'Ime uređaja: ${nearbyService.deviceName} | Uloga: $selectedRole',
+      );
+      _addSystemMessage('Uloga: ${nearbyService.deviceRole}');
       _addSystemMessage('ID: ${nearbyService.deviceId.substring(0, 8)}');
     });
   }
@@ -506,7 +548,6 @@ class _ChatScreenState extends State<ChatScreen>
       await nearbyService.sendMessage(text);
     }
   }
-
 
   void _startLocationBroadcast() {
     locationBroadcastTimer?.cancel();
@@ -1117,7 +1158,7 @@ class _ChatScreenState extends State<ChatScreen>
           Text(
             nearbyService.deviceName.isEmpty
                 ? 'Nije podešeno'
-                : nearbyService.deviceName,
+                : '${nearbyService.deviceName} ($selectedRole)',
             style: const TextStyle(
               color: Colors.white,
               fontSize: 12,
@@ -1546,7 +1587,7 @@ class _ChatScreenState extends State<ChatScreen>
               style: TextStyle(color: Colors.white, fontSize: 18),
             ),
             Text(
-              '$deviceName | Povezano: $connectedCount',
+              '$deviceName • $selectedRole | Povezano: $connectedCount',
               style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.65),
                 fontSize: 11,
@@ -1585,22 +1626,18 @@ class _ChatScreenState extends State<ChatScreen>
             icon: const Icon(Icons.search, color: Colors.white),
           ),
           IconButton(
-  tooltip: 'Mapa',
-  onPressed: () {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => MeshMapScreen(
-  meshUserLocations: meshUserLocations,
-),
-      ),
-    );
-  },
-  icon: const Icon(
-    Icons.map,
-    color: Colors.white,
-  ),
-),
+            tooltip: 'Mapa',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      MeshMapScreen(meshUserLocations: meshUserLocations),
+                ),
+              );
+            },
+            icon: const Icon(Icons.map, color: Colors.white),
+          ),
 
           IconButton(
             tooltip: 'Stop',
@@ -1617,30 +1654,61 @@ class _ChatScreenState extends State<ChatScreen>
                 Container(
                   padding: const EdgeInsets.all(12),
                   color: const Color(0xFF151A23),
-                  child: Row(
+                  child: Column(
                     children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _nameController,
-                          style: const TextStyle(color: Colors.white),
-                          decoration: InputDecoration(
-                            hintText: 'Unesi ime uređaja...',
-                            hintStyle: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.5),
-                            ),
-                            filled: true,
-                            fillColor: const Color(0xFF0E1117),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: BorderSide.none,
-                            ),
+                      TextField(
+                        controller: _nameController,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: 'Unesi ime uređaja...',
+                          hintStyle: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.5),
+                          ),
+                          filled: true,
+                          fillColor: const Color(0xFF0E1117),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide.none,
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      ElevatedButton(
-                        onPressed: _saveDeviceName,
-                        child: const Text('OK'),
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<String>(
+                        value: selectedRole,
+                        dropdownColor: const Color(0xFF151A23),
+                        iconEnabledColor: Colors.white70,
+                        decoration: InputDecoration(
+                          labelText: 'Uloga u akciji',
+                          labelStyle: const TextStyle(color: Colors.white70),
+                          filled: true,
+                          fillColor: const Color(0xFF0E1117),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                        style: const TextStyle(color: Colors.white),
+                        items: availableRoles.map((role) {
+                          return DropdownMenuItem<String>(
+                            value: role,
+                            child: Text(role),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          if (value == null) return;
+
+                          setState(() {
+                            selectedRole = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: _saveDeviceName,
+                          child: const Text('SAČUVAJ'),
+                        ),
                       ),
                     ],
                   ),
