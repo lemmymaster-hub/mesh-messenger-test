@@ -6,6 +6,7 @@ import '../models/chat_message.dart';
 import '../services/nearby_service.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'map/mesh_map_screen.dart';
+import 'package:battery_plus/battery_plus.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -21,6 +22,7 @@ class _ChatScreenState extends State<ChatScreen>
   final ScrollController _scrollController = ScrollController();
 
   late final NearbyService nearbyService;
+  final Battery _battery = Battery();
   late final AnimationController _sosPulseController;
   late final Animation<double> _sosPulseAnimation;
   final AudioPlayer _sosAudioPlayer = AudioPlayer();
@@ -56,6 +58,7 @@ class _ChatScreenState extends State<ChatScreen>
   String incomingSosMessage = '';
   String? incomingSosId;
 
+  int _batteryLevel = 0;
   int sosSentCount = 0;
   int sosAcceptedCount = 0;
   int sosPendingCount = 0;
@@ -112,6 +115,7 @@ class _ChatScreenState extends State<ChatScreen>
   @override
   void initState() {
     super.initState();
+    _loadBatteryLevel();
     _sosPulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 650),
@@ -158,7 +162,15 @@ class _ChatScreenState extends State<ChatScreen>
     };
 
     nearbyService.onLocationReceived =
-        (deviceId, deviceName, deviceRole, latitude, longitude, timestamp) {
+        (
+          deviceId,
+          deviceName,
+          deviceRole,
+          latitude,
+          longitude,
+          timestamp,
+          batteryLevel,
+        ) {
           if (!mounted) return;
 
           setState(() {
@@ -167,6 +179,7 @@ class _ChatScreenState extends State<ChatScreen>
               'lat': latitude,
               'lng': longitude,
               'time': timestamp,
+              'battery': batteryLevel ?? 0,
             };
 
             _logs.insert(
@@ -292,6 +305,18 @@ class _ChatScreenState extends State<ChatScreen>
         senderName: 'Sistem',
       ),
     );
+  }
+
+  Future<void> _loadBatteryLevel() async {
+    try {
+      final level = await _battery.batteryLevel;
+
+      if (!mounted) return;
+
+      setState(() {
+        _batteryLevel = level;
+      });
+    } catch (_) {}
   }
 
   void _addSosPublicLog(String text) {
@@ -579,9 +604,12 @@ class _ChatScreenState extends State<ChatScreen>
         desiredAccuracy: LocationAccuracy.high,
       );
 
+      await _loadBatteryLevel();
+
       await nearbyService.sendLocationUpdate(
         latitude: position.latitude,
         longitude: position.longitude,
+        batteryLevel: _batteryLevel,
       );
     } catch (e) {
       if (!mounted) return;
@@ -1674,7 +1702,7 @@ class _ChatScreenState extends State<ChatScreen>
                       ),
                       const SizedBox(height: 10),
                       DropdownButtonFormField<String>(
-                        value: selectedRole,
+                        initialValue: selectedRole,
                         dropdownColor: const Color(0xFF151A23),
                         iconEnabledColor: Colors.white70,
                         decoration: InputDecoration(

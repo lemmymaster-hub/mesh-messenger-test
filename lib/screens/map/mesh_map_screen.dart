@@ -25,6 +25,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
     required double lat,
     required double lng,
     required int timestamp,
+    required int battery,
   }) {
     final lastSeen = DateTime.fromMillisecondsSinceEpoch(timestamp);
     final now = DateTime.now();
@@ -56,9 +57,9 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
                 style: const TextStyle(color: Colors.white70),
               ),
               const SizedBox(height: 6),
-              const Text(
-                'Baterija: Nepoznato',
-                style: TextStyle(color: Colors.white70),
+              Text(
+                battery > 0 ? 'Baterija: $battery%' : 'Baterija: Nepoznato',
+                style: const TextStyle(color: Colors.white70),
               ),
               const SizedBox(height: 6),
               Text(
@@ -595,6 +596,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
                               lat: lat,
                               lng: lng,
                               timestamp: (entry.value['time'] ?? 0) as int,
+                              battery: (entry.value['battery'] ?? 0) as int,
                             );
                           },
                           child: Column(

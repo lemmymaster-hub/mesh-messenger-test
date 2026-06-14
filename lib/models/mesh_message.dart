@@ -7,13 +7,15 @@ class MeshMessage {
   final String senderRole;
   final String receiverId;
   final String text;
-  final String type; // group, private, hello, location, sos, sos_accept, sos_reject, sos_cancel
+  final String
+  type; // group, private, hello, location, sos, sos_accept, sos_reject, sos_cancel
   final int hopCount;
   final int maxHops;
   final int timestamp;
 
   final double? latitude;
   final double? longitude;
+  final int? batteryLevel;
   final String? sosId;
   final String? sosReason;
 
@@ -30,6 +32,7 @@ class MeshMessage {
     required this.timestamp,
     this.latitude,
     this.longitude,
+    this.batteryLevel,
     this.sosId,
     this.sosReason,
   });
@@ -48,6 +51,7 @@ class MeshMessage {
       'timestamp': timestamp,
       'latitude': latitude,
       'longitude': longitude,
+      'batteryLevel': batteryLevel,
       'sosId': sosId,
       'sosReason': sosReason,
     };
@@ -71,6 +75,7 @@ class MeshMessage {
       longitude: json['longitude'] == null
           ? null
           : (json['longitude'] as num).toDouble(),
+      batteryLevel: json['batteryLevel'],
       sosId: json['sosId'],
       sosReason: json['sosReason'],
     );
@@ -81,8 +86,6 @@ class MeshMessage {
   }
 
   factory MeshMessage.decode(String data) {
-    return MeshMessage.fromJson(
-      jsonDecode(data),
-    );
+    return MeshMessage.fromJson(jsonDecode(data));
   }
 }

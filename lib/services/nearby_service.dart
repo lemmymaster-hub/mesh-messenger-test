@@ -37,6 +37,7 @@ class NearbyService {
     double latitude,
     double longitude,
     int timestamp,
+    int? batteryLevel,
   )?
   onLocationReceived;
 
@@ -314,6 +315,7 @@ class NearbyService {
             meshMessage.latitude!,
             meshMessage.longitude!,
             meshMessage.timestamp,
+            meshMessage.batteryLevel,
           );
         }
 
@@ -485,13 +487,13 @@ class NearbyService {
     }
   }
 
-  Future<void> sendSosMessage({
+  Future<String?> sendSosMessage({
     required double latitude,
     required double longitude,
   }) async {
     if (deviceName.isEmpty) {
       onLog?.call('Prvo unesi ime uređaja.');
-      return;
+      return null;
     }
 
     if (deviceId.isEmpty) {
@@ -500,7 +502,7 @@ class NearbyService {
 
     if (connectedDevices.isEmpty) {
       onLog?.call('Nema povezanih uređaja za SOS');
-      return;
+      return null;
     }
 
     final sosId = uuid.v4();
@@ -548,6 +550,7 @@ class NearbyService {
     }
 
     onLog?.call('SOS poslat: $sosId');
+    return sosId;
   }
 
   Future<void> sendSosCancel({required String sosId}) async {
@@ -688,6 +691,7 @@ class NearbyService {
   Future<void> sendLocationUpdate({
     required double latitude,
     required double longitude,
+    required int batteryLevel,
   }) async {
     if (deviceName.isEmpty) {
       onLog?.call('Prvo unesi ime uređaja.');
@@ -716,6 +720,7 @@ class NearbyService {
       timestamp: DateTime.now().millisecondsSinceEpoch,
       latitude: latitude,
       longitude: longitude,
+      batteryLevel: batteryLevel,
     );
 
     processedMessages.add(meshMessage.messageId);

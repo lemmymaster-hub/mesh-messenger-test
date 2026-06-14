@@ -46,6 +46,8 @@ dependencies:
   flutter_map: ^8.3.0
   latlong2: ^0.9.1
   http: ^1.6.0
+  battery_plus: ^6.2.2
+  
 dev_dependencies:
   flutter_test:
     sdk: flutter
