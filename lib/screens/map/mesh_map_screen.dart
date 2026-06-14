@@ -586,33 +586,46 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
                         point: LatLng(lat, lng),
                         width: 90,
                         height: 70,
-                        child: Column(
-                          children: [
-                            Image.asset(
-                              _roleMarker(
-                                (entry.value['role'] ?? 'Volonter').toString(),
+                        child: GestureDetector(
+                          onTap: () {
+                            _showMeshUserInfo(
+                              name: entry.key,
+                              role: (entry.value['role'] ?? 'Volonter')
+                                  .toString(),
+                              lat: lat,
+                              lng: lng,
+                              timestamp: (entry.value['time'] ?? 0) as int,
+                            );
+                          },
+                          child: Column(
+                            children: [
+                              Image.asset(
+                                _roleMarker(
+                                  (entry.value['role'] ?? 'Volonter')
+                                      .toString(),
+                                ),
+                                width: 42,
+                                height: 42,
                               ),
-                              width: 42,
-                              height: 42,
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.black87,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                entry.key,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.black87,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  entry.key,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       );
                     }).toList(),
