@@ -24,81 +24,6 @@ class MeshMapScreen extends StatefulWidget {
 class _MeshMapScreenState extends State<MeshMapScreen> {
   final MapController _mapController = MapController();
   final TextEditingController _searchController = TextEditingController();
-  void _showMeshUserInfo({
-    required String name,
-    required String role,
-    required double lat,
-    required double lng,
-    required int timestamp,
-    required int battery,
-  }) {
-    final lastSeen = DateTime.fromMillisecondsSinceEpoch(timestamp);
-    final now = DateTime.now();
-    final diff = now.difference(lastSeen);
-    final Color batteryColor = battery <= 0
-    ? Colors.white54
-    : battery < 20
-        ? Colors.redAccent
-        : battery < 50
-            ? Colors.orangeAccent
-            : Colors.greenAccent;
-
-final String batteryText = battery > 0
-    ? '🔋 Baterija: $battery%'
-    : '🔋 Baterija: Nepoznato';
-
-    final lastSeenText = diff.inSeconds < 60
-        ? 'prije ${diff.inSeconds} sekundi'
-        : diff.inMinutes < 60
-        ? 'prije ${diff.inMinutes} minuta'
-        : 'prije ${diff.inHours} sati';
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF151A23),
-          title: Text(name, style: const TextStyle(color: Colors.white)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Uloga: $role',
-                style: const TextStyle(color: Colors.white70),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Koordinate: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
-                style: const TextStyle(color: Colors.white70),
-              ),
-              const SizedBox(height: 6),
-              Text(
-  batteryText,
-  style: TextStyle(
-    color: batteryColor,
-    fontWeight: FontWeight.bold,
-  ),
-),
-              const SizedBox(height: 6),
-              Text(
-                'Zadnji put viđen: $lastSeenText',
-                style: const TextStyle(color: Colors.white70),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop();
-              },
-              child: const Text('Zatvori'),
-            ),
-          ],
-        );
-      },
-    );
-  }
 
   LatLng _mapCenter = const LatLng(43.8167, 18.35);
   double _currentZoom = 12;
@@ -106,24 +31,66 @@ final String batteryText = battery > 0
   bool _isDownloadingMap = false;
   String? _offlineAreaName;
   List<Map<String, dynamic>> _offlineAreas = [];
-  IconData _roleIcon(String role) {
-    switch (role) {
-      case 'Komandant':
-        return Icons.star;
-      case 'Operater':
-        return Icons.computer;
-      case 'Vatrogasac':
-        return Icons.local_fire_department;
-      case 'Policija':
-        return Icons.local_police;
-      case 'GSS':
-        return Icons.terrain;
-      case 'CK':
-        return Icons.medical_services;
-      case 'Volonter':
-      default:
-        return Icons.person_pin_circle;
+  String _selectedRoleFilter = 'Svi';
+
+  final List<String> _roleFilters = [
+    'Svi',
+    'Komandant',
+    'Operater',
+    'Vatrogasac',
+    'Policija',
+    'GSS',
+    'CK',
+    'Hitna',
+    'Volonter',
+  ];
+
+  double? _toDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    if (value == null) return null;
+    return double.tryParse(value.toString());
+  }
+
+  bool _isValidLatLng(double? lat, double? lng) {
+    if (lat == null || lng == null) return false;
+    if (!lat.isFinite || !lng.isFinite) return false;
+    if (lat < -90 || lat > 90) return false;
+    if (lng < -180 || lng > 180) return false;
+    return true;
+  }
+
+  bool _isValidLatLngObject(LatLng? point) {
+    if (point == null) return false;
+    return _isValidLatLng(point.latitude, point.longitude);
+  }
+
+  double _safeZoom(double zoom) {
+    if (!zoom.isFinite) return 12;
+    if (zoom < 3) return 3;
+    if (zoom > 19) return 19;
+    return zoom;
+  }
+
+  void _safeMoveMap(LatLng point, double zoom) {
+    if (!_isValidLatLngObject(point)) return;
+    final safeZoom = _safeZoom(zoom);
+
+    setState(() {
+      _mapCenter = point;
+      _currentZoom = safeZoom;
+    });
+
+    _mapController.move(point, safeZoom);
+  }
+
+  String _centerText() {
+    if (!_isValidLatLngObject(_mapCenter)) {
+      return 'Centar: Nepoznat | Zoom: ${_currentZoom.toStringAsFixed(1)}';
     }
+
+    return 'Centar: ${_mapCenter.latitude.toStringAsFixed(5)}, '
+        '${_mapCenter.longitude.toStringAsFixed(5)} | '
+        'Zoom: ${_currentZoom.toStringAsFixed(1)}';
   }
 
   String _roleMarker(String role) {
@@ -155,6 +122,158 @@ final String batteryText = battery > 0
     }
   }
 
+  void _showMeshUserInfo({
+    required String name,
+    required String role,
+    required double lat,
+    required double lng,
+    required int timestamp,
+    required int battery,
+  }) {
+    final lastSeen = timestamp > 0
+        ? DateTime.fromMillisecondsSinceEpoch(timestamp)
+        : null;
+
+    final String lastSeenText;
+
+    if (lastSeen == null) {
+      lastSeenText = 'Nepoznato';
+    } else {
+      final now = DateTime.now();
+      final diff = now.difference(lastSeen);
+
+      if (diff.inSeconds < 60) {
+        lastSeenText = 'prije ${diff.inSeconds} sekundi';
+      } else if (diff.inMinutes < 60) {
+        lastSeenText = 'prije ${diff.inMinutes} minuta';
+      } else {
+        lastSeenText = 'prije ${diff.inHours} sati';
+      }
+    }
+
+    final Color batteryColor = battery <= 0
+        ? Colors.white54
+        : battery < 20
+        ? Colors.redAccent
+        : battery < 50
+        ? Colors.orangeAccent
+        : Colors.greenAccent;
+
+    final String batteryText = battery > 0
+        ? '🔋 Baterija: $battery%'
+        : '🔋 Baterija: Nepoznato';
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF151A23),
+          title: Text(name, style: const TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Uloga: $role',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Koordinate: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                batteryText,
+                style: TextStyle(
+                  color: batteryColor,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Zadnji put viđen: $lastSeenText',
+                style: const TextStyle(color: Colors.white70),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+              },
+              child: const Text('Zatvori'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showSosInfo(MapEntry<String, Map<String, dynamic>> entry) {
+    final sender = entry.value['sender']?.toString() ?? entry.key;
+    final message = entry.value['message']?.toString() ?? '';
+    final status = entry.value['status']?.toString() ?? 'active';
+    final timeRaw = _toDouble(entry.value['time'])?.toInt() ?? 0;
+    final lat = _toDouble(entry.value['lat']);
+    final lng = _toDouble(entry.value['lng']);
+
+    String timeText = 'Nepoznato';
+
+    if (timeRaw > 0) {
+      final date = DateTime.fromMillisecondsSinceEpoch(timeRaw);
+      timeText =
+          '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+    }
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF151A23),
+        title: const Text(
+          '🆘 AKTIVAN SOS',
+          style: TextStyle(color: Colors.redAccent),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Pošiljalac: $sender',
+              style: const TextStyle(color: Colors.white),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Status: $status',
+              style: const TextStyle(color: Colors.redAccent),
+            ),
+            const SizedBox(height: 6),
+            if (_isValidLatLng(lat, lng))
+              Text(
+                'Lokacija: ${lat!.toStringAsFixed(5)}, ${lng!.toStringAsFixed(5)}',
+                style: const TextStyle(color: Colors.white70),
+              ),
+            const SizedBox(height: 6),
+            Text(
+              'Vrijeme: $timeText',
+              style: const TextStyle(color: Colors.white70),
+            ),
+            if (message.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(message, style: const TextStyle(color: Colors.white70)),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Zatvori'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _loadMyLocation() async {
     try {
       LocationPermission permission = await Geolocator.checkPermission();
@@ -169,8 +288,12 @@ final String batteryText = battery > 0
       }
 
       final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
       );
+
+      if (!_isValidLatLng(position.latitude, position.longitude)) return;
 
       final myPosition = LatLng(position.latitude, position.longitude);
 
@@ -178,11 +301,9 @@ final String batteryText = battery > 0
 
       setState(() {
         _myLocation = myPosition;
-        _mapCenter = myPosition;
-        _currentZoom = 15;
       });
 
-      _mapController.move(myPosition, 15);
+      _safeMoveMap(myPosition, 15);
     } catch (_) {
       // Ako GPS nije dostupan, ostaje fallback Sarajevo/Istočno Sarajevo.
     }
@@ -206,12 +327,26 @@ final String batteryText = battery > 0
     final prefs = await SharedPreferences.getInstance();
     final savedList = prefs.getStringList('offline_map_areas_v2') ?? [];
 
+    final loadedAreas = <Map<String, dynamic>>[];
+
+    for (final item in savedList) {
+      try {
+        final decoded = jsonDecode(item) as Map<String, dynamic>;
+        final lat = _toDouble(decoded['lat']);
+        final lng = _toDouble(decoded['lng']);
+
+        if (_isValidLatLng(lat, lng)) {
+          loadedAreas.add(decoded);
+        }
+      } catch (_) {
+        // Preskoči neispravan zapis.
+      }
+    }
+
     if (!mounted) return;
 
     setState(() {
-      _offlineAreas = savedList
-          .map((item) => jsonDecode(item) as Map<String, dynamic>)
-          .toList();
+      _offlineAreas = loadedAreas;
     });
   }
 
@@ -316,16 +451,15 @@ final String batteryText = battery > 0
       }
 
       final firstResult = data.first as Map<String, dynamic>;
-      final lat = double.parse(firstResult['lat'] as String);
-      final lon = double.parse(firstResult['lon'] as String);
-      final newCenter = LatLng(lat, lon);
+      final lat = _toDouble(firstResult['lat']);
+      final lon = _toDouble(firstResult['lon']);
 
-      setState(() {
-        _mapCenter = newCenter;
-        _currentZoom = 13;
-      });
+      if (!_isValidLatLng(lat, lon)) {
+        throw Exception('Pretraga je vratila neispravne koordinate');
+      }
 
-      _mapController.move(newCenter, 13);
+      final newCenter = LatLng(lat!, lon!);
+      _safeMoveMap(newCenter, 13);
 
       if (!mounted) return;
 
@@ -343,6 +477,17 @@ final String batteryText = battery > 0
 
   Future<void> _downloadCurrentArea() async {
     if (_isDownloadingMap) return;
+
+    if (!_isValidLatLngObject(_mapCenter)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Centar mape nije validan. Pomjeri mapu i pokušaj opet.',
+          ),
+        ),
+      );
+      return;
+    }
 
     final defaultName = _searchController.text.trim().isEmpty
         ? 'Područje ${_mapCenter.latitude.toStringAsFixed(4)}, ${_mapCenter.longitude.toStringAsFixed(4)}'
@@ -389,6 +534,8 @@ final String batteryText = battery > 0
       },
     );
 
+    nameController.dispose();
+
     if (areaName == null || areaName.isEmpty) {
       return;
     }
@@ -404,7 +551,7 @@ final String batteryText = battery > 0
       'name': areaName,
       'lat': _mapCenter.latitude,
       'lng': _mapCenter.longitude,
-      'zoom': _currentZoom,
+      'zoom': _safeZoom(_currentZoom),
       'createdAt': DateTime.now().toIso8601String(),
     };
 
@@ -424,22 +571,20 @@ final String batteryText = battery > 0
   }
 
   void _openOfflineArea(Map<String, dynamic> area) {
-    final lat = (area['lat'] as num?)?.toDouble();
-    final lng = (area['lng'] as num?)?.toDouble();
-    final zoom = (area['zoom'] as num?)?.toDouble() ?? 13;
+    final lat = _toDouble(area['lat']);
+    final lng = _toDouble(area['lng']);
+    final zoom = _safeZoom(_toDouble(area['zoom']) ?? 13);
     final areaName = area['name']?.toString() ?? 'Offline mapa';
 
-    if (lat == null || lng == null) return;
+    if (!_isValidLatLng(lat, lng)) return;
 
-    final newCenter = LatLng(lat, lng);
+    final newCenter = LatLng(lat!, lng!);
 
     setState(() {
-      _mapCenter = newCenter;
-      _currentZoom = zoom;
       _offlineAreaName = areaName;
     });
 
-    _mapController.move(newCenter, zoom);
+    _safeMoveMap(newCenter, zoom);
   }
 
   Widget _offlineAreaChips() {
@@ -498,8 +643,129 @@ final String batteryText = battery > 0
     );
   }
 
+  List<Marker> _myLocationMarkers() {
+    if (!_isValidLatLngObject(_myLocation)) return [];
+
+    return [
+      Marker(
+        point: _myLocation!,
+        width: 60,
+        height: 60,
+        child: const Icon(
+          Icons.my_location,
+          color: Colors.blueAccent,
+          size: 36,
+        ),
+      ),
+    ];
+  }
+
+  List<Marker> _meshUserMarkers() {
+    return widget.meshUserLocations.entries
+        .where((entry) {
+          final role = (entry.value['role'] ?? 'Volonter').toString();
+
+          if (_selectedRoleFilter == 'Svi') {
+            return true;
+          }
+
+          return role == _selectedRoleFilter;
+        })
+        .map((entry) {
+          final lat = _toDouble(entry.value['lat']);
+          final lng = _toDouble(entry.value['lng']);
+
+          if (!_isValidLatLng(lat, lng)) return null;
+
+          final role = (entry.value['role'] ?? 'Volonter').toString();
+          final timestamp = _toDouble(entry.value['time'])?.toInt() ?? 0;
+          final battery = _toDouble(entry.value['battery'])?.toInt() ?? 0;
+
+          return Marker(
+            point: LatLng(lat!, lng!),
+            width: 90,
+            height: 70,
+            child: GestureDetector(
+              onTap: () {
+                _showMeshUserInfo(
+                  name: entry.key,
+                  role: role,
+                  lat: lat,
+                  lng: lng,
+                  timestamp: timestamp,
+                  battery: battery,
+                );
+              },
+              child: Column(
+                children: [
+                  Image.asset(_roleMarker(role), width: 42, height: 42),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black87,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      entry.key,
+                      style: const TextStyle(color: Colors.white, fontSize: 10),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        })
+        .whereType<Marker>()
+        .toList();
+  }
+
+  List<Marker> _sosMarkers() {
+    return widget.meshSosLocations.entries
+        .map((entry) {
+          final lat = _toDouble(entry.value['lat']);
+          final lng = _toDouble(entry.value['lng']);
+
+          if (!_isValidLatLng(lat, lng)) return null;
+
+          return Marker(
+            point: LatLng(lat!, lng!),
+            width: 76,
+            height: 76,
+            child: GestureDetector(
+              onTap: () => _showSosInfo(entry),
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.red.withValues(alpha: 0.18),
+                  border: Border.all(color: Colors.redAccent, width: 2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.redAccent.withValues(alpha: 0.55),
+                      blurRadius: 16,
+                      spreadRadius: 3,
+                    ),
+                  ],
+                ),
+                child: const Center(
+                  child: Icon(Icons.emergency, color: Colors.red, size: 42),
+                ),
+              ),
+            ),
+          );
+        })
+        .whereType<Marker>()
+        .toList();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final myLocationMarkers = _myLocationMarkers();
+    final userMarkers = _meshUserMarkers();
+    final sosMarkers = _sosMarkers();
+
     return Scaffold(
       backgroundColor: const Color(0xFF0E1117),
       appBar: AppBar(
@@ -543,9 +809,29 @@ final String batteryText = battery > 0
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Centar: ${_mapCenter.latitude.toStringAsFixed(5)}, '
-                  '${_mapCenter.longitude.toStringAsFixed(5)} | Zoom: ${_currentZoom.toStringAsFixed(1)}',
+                  _centerText(),
                   style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                const SizedBox(height: 8),
+
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: _roleFilters.map((role) {
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: ChoiceChip(
+                          label: Text(role),
+                          selected: _selectedRoleFilter == role,
+                          onSelected: (_) {
+                            setState(() {
+                              _selectedRoleFilter = role;
+                            });
+                          },
+                        ),
+                      );
+                    }).toList(),
+                  ),
                 ),
                 if (_offlineAreaName != null)
                   Padding(
@@ -567,13 +853,20 @@ final String batteryText = battery > 0
             child: FlutterMap(
               mapController: _mapController,
               options: MapOptions(
-                initialCenter: _mapCenter,
-                initialZoom: _currentZoom,
+                initialCenter: _isValidLatLngObject(_mapCenter)
+                    ? _mapCenter
+                    : const LatLng(43.8167, 18.35),
+                initialZoom: _safeZoom(_currentZoom),
                 onPositionChanged: (position, hasGesture) {
-                  setState(() {
-                    _mapCenter = position.center;
-                    _currentZoom = position.zoom;
-                  });
+                  final center = position.center;
+                  final zoom = _safeZoom(position.zoom);
+
+                  if (_isValidLatLngObject(center)) {
+                    setState(() {
+                      _mapCenter = center;
+                      _currentZoom = zoom;
+                    });
+                  }
                 },
               ),
               children: [
@@ -581,112 +874,10 @@ final String batteryText = battery > 0
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                   userAgentPackageName: 'com.example.mesh_messenger_test',
                 ),
-                if (_myLocation != null)
-                  MarkerLayer(
-                    markers: [
-                      Marker(
-                        point: _myLocation!,
-                        width: 60,
-                        height: 60,
-                        child: const Icon(
-                          Icons.my_location,
-                          color: Colors.blueAccent,
-                          size: 36,
-                        ),
-                      ),
-                    ],
-                  ),
-                if (widget.meshUserLocations.isNotEmpty)
-                  MarkerLayer(
-                    markers: widget.meshUserLocations.entries.map((entry) {
-                      final lat = entry.value['lat'];
-                      final lng = entry.value['lng'];
-
-                      return Marker(
-                        point: LatLng(lat, lng),
-                        width: 90,
-                        height: 70,
-                        child: GestureDetector(
-                          onTap: () {
-                            _showMeshUserInfo(
-                              name: entry.key,
-                              role: (entry.value['role'] ?? 'Volonter')
-                                  .toString(),
-                              lat: lat,
-                              lng: lng,
-                              timestamp: (entry.value['time'] ?? 0) as int,
-                              battery: (entry.value['battery'] ?? 0) as int,
-                            );
-                          },
-                          child: Column(
-                            children: [
-                              Image.asset(
-                                _roleMarker(
-                                  (entry.value['role'] ?? 'Volonter')
-                                      .toString(),
-                                ),
-                                width: 42,
-                                height: 42,
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 4,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.black87,
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  entry.key,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 10,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  if (widget.meshSosLocations.isNotEmpty)
-  MarkerLayer(
-    markers: widget.meshSosLocations.entries.map((entry) {
-      final lat = entry.value['lat'];
-      final lng = entry.value['lng'];
-
-      return Marker(
-        point: LatLng(lat, lng),
-        width: 70,
-        height: 70,
-        child: GestureDetector(
-          onTap: () {
-            showDialog(
-              context: context,
-              builder: (_) => AlertDialog(
-                backgroundColor: const Color(0xFF151A23),
-                title: const Text(
-                  '🆘 AKTIVAN SOS',
-                  style: TextStyle(color: Colors.redAccent),
-                ),
-                content: Text(
-                  '${entry.value['sender']}',
-                  style: const TextStyle(color: Colors.white),
-                ),
-              ),
-            );
-          },
-          child: const Icon(
-            Icons.emergency,
-            color: Colors.red,
-            size: 42,
-          ),
-        ),
-      );
-    }).toList(),
-  ),
+                if (myLocationMarkers.isNotEmpty)
+                  MarkerLayer(markers: myLocationMarkers),
+                if (userMarkers.isNotEmpty) MarkerLayer(markers: userMarkers),
+                if (sosMarkers.isNotEmpty) MarkerLayer(markers: sosMarkers),
               ],
             ),
           ),
@@ -700,15 +891,12 @@ final String batteryText = battery > 0
             heroTag: 'my_location',
             backgroundColor: Colors.blueAccent,
             onPressed: () {
-              if (_myLocation == null) return;
-
-              _mapController.move(_myLocation!, 15);
+              if (!_isValidLatLngObject(_myLocation)) return;
+              _safeMoveMap(_myLocation!, 15);
             },
             child: const Icon(Icons.my_location),
           ),
-
           const SizedBox(height: 10),
-
           FloatingActionButton.extended(
             heroTag: 'download_map',
             onPressed: _downloadCurrentArea,

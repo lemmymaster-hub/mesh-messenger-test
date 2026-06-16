@@ -202,23 +202,25 @@ class _ChatScreenState extends State<ChatScreen>
           incomingSosSender = senderName;
           incomingSosMessage = message;
           incomingSosId = DateTime.now().millisecondsSinceEpoch.toString();
-          final latMatch = RegExp(r'Lokacija: ([\d\.-]+), ([\d\.-]+)').firstMatch(message);
+          final latMatch = RegExp(
+            r'Lokacija: ([\d\.-]+), ([\d\.-]+)',
+          ).firstMatch(message);
 
-if (latMatch != null) {
-  final lat = double.tryParse(latMatch.group(1) ?? '');
-  final lng = double.tryParse(latMatch.group(2) ?? '');
+          if (latMatch != null) {
+            final lat = double.tryParse(latMatch.group(1) ?? '');
+            final lng = double.tryParse(latMatch.group(2) ?? '');
 
-  if (lat != null && lng != null) {
-    meshSosLocations[senderName] = {
-      'lat': lat,
-      'lng': lng,
-      'time': DateTime.now().millisecondsSinceEpoch,
-      'message': message,
-      'sender': senderName,
-      'status': 'active',
-    };
-  }
-}
+            if (lat != null && lng != null) {
+              meshSosLocations[senderName] = {
+                'lat': lat,
+                'lng': lng,
+                'time': DateTime.now().millisecondsSinceEpoch,
+                'message': message,
+                'sender': senderName,
+                'status': 'active',
+              };
+            }
+          }
           _setPinnedSosCard(
             status: 'active',
             title: '🆘 AKTIVAN SOS',
@@ -247,6 +249,9 @@ if (latMatch != null) {
           );
         } else if (type == 'sos_cancel') {
           _stopIncomingSosAlarm();
+          meshSosLocations.removeWhere((key, value) {
+            return key == senderName || value['sender'] == senderName;
+          });
 
           incomingSosActive = false;
           sosActive = false;
@@ -1675,14 +1680,14 @@ if (latMatch != null) {
             tooltip: 'Mapa',
             onPressed: () {
               Navigator.push(
-  context,
-  MaterialPageRoute(
-    builder: (_) => MeshMapScreen(
-      meshUserLocations: meshUserLocations,
-      meshSosLocations: meshSosLocations,
-    ),
-  ),
-);
+                context,
+                MaterialPageRoute(
+                  builder: (_) => MeshMapScreen(
+                    meshUserLocations: meshUserLocations,
+                    meshSosLocations: meshSosLocations,
+                  ),
+                ),
+              );
             },
             icon: const Icon(Icons.map, color: Colors.white),
           ),
