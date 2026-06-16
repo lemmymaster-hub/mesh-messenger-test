@@ -9,8 +9,13 @@ import 'package:geolocator/geolocator.dart';
 
 class MeshMapScreen extends StatefulWidget {
   final Map<String, Map<String, dynamic>> meshUserLocations;
+  final Map<String, Map<String, dynamic>> meshSosLocations;
 
-  const MeshMapScreen({super.key, this.meshUserLocations = const {}});
+  const MeshMapScreen({
+    super.key,
+    required this.meshUserLocations,
+    required this.meshSosLocations,
+  });
 
   @override
   State<MeshMapScreen> createState() => _MeshMapScreenState();
@@ -30,6 +35,17 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
     final lastSeen = DateTime.fromMillisecondsSinceEpoch(timestamp);
     final now = DateTime.now();
     final diff = now.difference(lastSeen);
+    final Color batteryColor = battery <= 0
+    ? Colors.white54
+    : battery < 20
+        ? Colors.redAccent
+        : battery < 50
+            ? Colors.orangeAccent
+            : Colors.greenAccent;
+
+final String batteryText = battery > 0
+    ? '🔋 Baterija: $battery%'
+    : '🔋 Baterija: Nepoznato';
 
     final lastSeenText = diff.inSeconds < 60
         ? 'prije ${diff.inSeconds} sekundi'
@@ -58,9 +74,12 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
               ),
               const SizedBox(height: 6),
               Text(
-                battery > 0 ? 'Baterija: $battery%' : 'Baterija: Nepoznato',
-                style: const TextStyle(color: Colors.white70),
-              ),
+  batteryText,
+  style: TextStyle(
+    color: batteryColor,
+    fontWeight: FontWeight.bold,
+  ),
+),
               const SizedBox(height: 6),
               Text(
                 'Zadnji put viđen: $lastSeenText',
@@ -632,6 +651,42 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
                       );
                     }).toList(),
                   ),
+                  if (widget.meshSosLocations.isNotEmpty)
+  MarkerLayer(
+    markers: widget.meshSosLocations.entries.map((entry) {
+      final lat = entry.value['lat'];
+      final lng = entry.value['lng'];
+
+      return Marker(
+        point: LatLng(lat, lng),
+        width: 70,
+        height: 70,
+        child: GestureDetector(
+          onTap: () {
+            showDialog(
+              context: context,
+              builder: (_) => AlertDialog(
+                backgroundColor: const Color(0xFF151A23),
+                title: const Text(
+                  '🆘 AKTIVAN SOS',
+                  style: TextStyle(color: Colors.redAccent),
+                ),
+                content: Text(
+                  '${entry.value['sender']}',
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+            );
+          },
+          child: const Icon(
+            Icons.emergency,
+            color: Colors.red,
+            size: 42,
+          ),
+        ),
+      );
+    }).toList(),
+  ),
               ],
             ),
           ),

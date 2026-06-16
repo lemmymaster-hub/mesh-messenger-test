@@ -30,6 +30,7 @@ class _ChatScreenState extends State<ChatScreen>
   final List<String> _logs = [];
   final List<ChatMessage> _privateMessages = [];
   final Map<String, Map<String, dynamic>> meshUserLocations = {};
+  final Map<String, Map<String, dynamic>> meshSosLocations = {};
   bool showNameEditor = false;
   String selectedRole = 'Volonter';
 
@@ -201,6 +202,23 @@ class _ChatScreenState extends State<ChatScreen>
           incomingSosSender = senderName;
           incomingSosMessage = message;
           incomingSosId = DateTime.now().millisecondsSinceEpoch.toString();
+          final latMatch = RegExp(r'Lokacija: ([\d\.-]+), ([\d\.-]+)').firstMatch(message);
+
+if (latMatch != null) {
+  final lat = double.tryParse(latMatch.group(1) ?? '');
+  final lng = double.tryParse(latMatch.group(2) ?? '');
+
+  if (lat != null && lng != null) {
+    meshSosLocations[senderName] = {
+      'lat': lat,
+      'lng': lng,
+      'time': DateTime.now().millisecondsSinceEpoch,
+      'message': message,
+      'sender': senderName,
+      'status': 'active',
+    };
+  }
+}
           _setPinnedSosCard(
             status: 'active',
             title: '🆘 AKTIVAN SOS',
@@ -1657,12 +1675,14 @@ class _ChatScreenState extends State<ChatScreen>
             tooltip: 'Mapa',
             onPressed: () {
               Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) =>
-                      MeshMapScreen(meshUserLocations: meshUserLocations),
-                ),
-              );
+  context,
+  MaterialPageRoute(
+    builder: (_) => MeshMapScreen(
+      meshUserLocations: meshUserLocations,
+      meshSosLocations: meshSosLocations,
+    ),
+  ),
+);
             },
             icon: const Icon(Icons.map, color: Colors.white),
           ),
