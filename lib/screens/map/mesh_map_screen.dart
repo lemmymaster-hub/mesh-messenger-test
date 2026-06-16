@@ -23,7 +23,7 @@ class MeshMapScreen extends StatefulWidget {
 
 class _MeshMapScreenState extends State<MeshMapScreen> {
   final MapController _mapController = MapController();
-  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   LatLng _mapCenter = const LatLng(43.8167, 18.35);
   double _currentZoom = 12;
@@ -80,7 +80,15 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
       _currentZoom = safeZoom;
     });
 
-    _mapController.move(point, safeZoom);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      try {
+        _mapController.move(point, safeZoom);
+      } catch (_) {
+        // MapController možda još nije spreman; ignoriši sigurno.
+      }
+    });
   }
 
   String _centerText() {
@@ -319,7 +327,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
 
   @override
   void dispose() {
-    _searchController.dispose();
+    FocusManager.instance.primaryFocus?.unfocus();
     super.dispose();
   }
 
@@ -417,7 +425,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
   }
 
   Future<void> _searchPlace() async {
-    final query = _searchController.text.trim();
+    final query = _searchQuery.trim();
 
     if (query.isEmpty) {
       return;
@@ -489,11 +497,13 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
       return;
     }
 
-    final defaultName = _searchController.text.trim().isEmpty
-        ? 'Područje ${_mapCenter.latitude.toStringAsFixed(4)}, ${_mapCenter.longitude.toStringAsFixed(4)}'
-        : _searchController.text.trim();
+    final currentSearchText = _searchQuery.trim();
 
-    final nameController = TextEditingController(text: defaultName);
+    final defaultName = currentSearchText.isEmpty
+        ? 'Područje ${_mapCenter.latitude.toStringAsFixed(4)}, ${_mapCenter.longitude.toStringAsFixed(4)}'
+        : currentSearchText;
+
+    String areaNameDraft = defaultName;
 
     final areaName = await showDialog<String>(
       context: context,
@@ -504,14 +514,17 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
             'Naziv offline mape',
             style: TextStyle(color: Colors.white),
           ),
-          content: TextField(
-            controller: nameController,
+          content: TextFormField(
+            initialValue: defaultName,
             autofocus: true,
             style: const TextStyle(color: Colors.white),
             decoration: InputDecoration(
               hintText: 'npr. Jahorina - Ogorjelica',
               hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.45)),
             ),
+            onChanged: (value) {
+              areaNameDraft = value;
+            },
           ),
           actions: [
             TextButton(
@@ -522,7 +535,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
             ),
             ElevatedButton(
               onPressed: () {
-                final name = nameController.text.trim();
+                final name = areaNameDraft.trim();
                 if (name.isEmpty) return;
 
                 Navigator.of(dialogContext).pop(name);
@@ -533,8 +546,6 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
         );
       },
     );
-
-    nameController.dispose();
 
     if (areaName == null || areaName.isEmpty) {
       return;
@@ -677,12 +688,14 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
 
           if (!_isValidLatLng(lat, lng)) return null;
 
+          final safeLat = lat!;
+          final safeLng = lng!;
           final role = (entry.value['role'] ?? 'Volonter').toString();
           final timestamp = _toDouble(entry.value['time'])?.toInt() ?? 0;
           final battery = _toDouble(entry.value['battery'])?.toInt() ?? 0;
 
           return Marker(
-            point: LatLng(lat!, lng!),
+            point: LatLng(safeLat, safeLng),
             width: 90,
             height: 70,
             child: GestureDetector(
@@ -690,8 +703,8 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
                 _showMeshUserInfo(
                   name: entry.key,
                   role: role,
-                  lat: lat,
-                  lng: lng,
+                  lat: safeLat,
+                  lng: safeLng,
                   timestamp: timestamp,
                   battery: battery,
                 );
@@ -730,8 +743,11 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
 
           if (!_isValidLatLng(lat, lng)) return null;
 
+          final safeLat = lat!;
+          final safeLng = lng!;
+
           return Marker(
-            point: LatLng(lat!, lng!),
+            point: LatLng(safeLat, safeLng),
             width: 76,
             height: 76,
             child: GestureDetector(
@@ -783,7 +799,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
             child: Column(
               children: [
                 TextField(
-                  controller: _searchController,
+                  key: const ValueKey('mesh_map_search_field'),
                   style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
                     hintText: 'Pretraži mjesto...',
@@ -805,7 +821,13 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
                       borderSide: BorderSide.none,
                     ),
                   ),
-                  onSubmitted: (_) => _searchPlace(),
+                  onChanged: (value) {
+                    _searchQuery = value;
+                  },
+                  onSubmitted: (value) {
+                    _searchQuery = value.trim();
+                    _searchPlace();
+                  },
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -858,15 +880,25 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
                     : const LatLng(43.8167, 18.35),
                 initialZoom: _safeZoom(_currentZoom),
                 onPositionChanged: (position, hasGesture) {
+                  if (!hasGesture) return;
+
                   final center = position.center;
                   final zoom = _safeZoom(position.zoom);
 
-                  if (_isValidLatLngObject(center)) {
-                    setState(() {
-                      _mapCenter = center;
-                      _currentZoom = zoom;
-                    });
+                  if (!_isValidLatLngObject(center)) return;
+
+                  final latDiff = (_mapCenter.latitude - center.latitude).abs();
+                  final lngDiff = (_mapCenter.longitude - center.longitude).abs();
+                  final zoomDiff = (_currentZoom - zoom).abs();
+
+                  if (latDiff < 0.00001 && lngDiff < 0.00001 && zoomDiff < 0.05) {
+                    return;
                   }
+
+                  setState(() {
+                    _mapCenter = center;
+                    _currentZoom = zoom;
+                  });
                 },
               ),
               children: [
