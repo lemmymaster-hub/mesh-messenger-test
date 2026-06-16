@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
+import '../../services/offline_map_service.dart';
 
 class MeshMapScreen extends StatefulWidget {
   final Map<String, Map<String, dynamic>> meshUserLocations;
@@ -23,6 +24,7 @@ class MeshMapScreen extends StatefulWidget {
 
 class _MeshMapScreenState extends State<MeshMapScreen> {
   final MapController _mapController = MapController();
+  final OfflineMapService _offlineMapService = OfflineMapService();
   String _searchQuery = '';
 
   LatLng _mapCenter = const LatLng(43.8167, 18.35);
@@ -485,7 +487,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
 
   Future<void> _downloadCurrentArea() async {
     if (_isDownloadingMap) return;
-
+    print('BSL DOWNLOAD MAP START');
     if (!_isValidLatLngObject(_mapCenter)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -555,14 +557,33 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
       _isDownloadingMap = true;
       _offlineAreaName = areaName;
     });
+    print('BSL CALLING DOWNLOAD AREA');
 
-    await Future.delayed(const Duration(seconds: 2));
+    final currentZoom = _safeZoom(_currentZoom).round();
+    final nextZoom = (currentZoom + 1).clamp(1, 18);
+
+    final result = await _offlineMapService.downloadArea(
+      centerLat: _mapCenter.latitude,
+      centerLng: _mapCenter.longitude,
+      zoomLevels: [
+        currentZoom,
+        nextZoom,
+      ],
+      radius: 5,
+    );
+
+    print(
+      'BSL DOWNLOAD AREA FINISHED: ${result.downloaded}/${result.total}',
+    );
 
     final offlineMap = {
       'name': areaName,
       'lat': _mapCenter.latitude,
       'lng': _mapCenter.longitude,
       'zoom': _safeZoom(_currentZoom),
+      'tileCache': true,
+      'downloadedTiles': result.downloaded,
+      'totalTiles': result.total,
       'createdAt': DateTime.now().toIso8601String(),
     };
 
@@ -577,7 +598,11 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Mapa sačuvana za offline: $areaName')),
+      SnackBar(
+        content: Text(
+          'Offline mapa sačuvana: $areaName (${result.downloaded}/${result.total} tileova)',
+        ),
+      ),
     );
   }
 
@@ -888,10 +913,13 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
                   if (!_isValidLatLngObject(center)) return;
 
                   final latDiff = (_mapCenter.latitude - center.latitude).abs();
-                  final lngDiff = (_mapCenter.longitude - center.longitude).abs();
+                  final lngDiff = (_mapCenter.longitude - center.longitude)
+                      .abs();
                   final zoomDiff = (_currentZoom - zoom).abs();
 
-                  if (latDiff < 0.00001 && lngDiff < 0.00001 && zoomDiff < 0.05) {
+                  if (latDiff < 0.00001 &&
+                      lngDiff < 0.00001 &&
+                      zoomDiff < 0.05) {
                     return;
                   }
 
