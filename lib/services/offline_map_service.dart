@@ -122,6 +122,7 @@ class OfflineMapService {
 
     /// radius 5 znači 11x11 tileova po zoom nivou.
     int radius = 1,
+    void Function(int current, int total)? onProgress,
   }) async {
     final selectedZoomLevels = <int>{
       if (zoom != null) zoom.clamp(1, 19),
@@ -139,6 +140,10 @@ class OfflineMapService {
     int total = 0;
     int success = 0;
     int failed = 0;
+    final totalExpected =
+    selectedZoomLevels.length * (safeRadius * 2 + 1) * (safeRadius * 2 + 1);
+
+int processed = 0;
 
     final zoomResults = <OfflineZoomDownloadResult>[];
 
@@ -164,6 +169,8 @@ class OfflineMapService {
             zoomFailed++;
             failed++;
           }
+          processed++;
+onProgress?.call(processed, totalExpected);
         }
       }
 

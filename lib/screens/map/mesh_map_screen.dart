@@ -32,6 +32,8 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
   LatLng? _myLocation;
   bool _isDownloadingMap = false;
   String? _offlineAreaName;
+  int _offlineDownloadCurrent = 0;
+  int _offlineDownloadTotal = 0;
   List<Map<String, dynamic>> _offlineAreas = [];
   String _selectedRoleFilter = 'Svi';
 
@@ -553,16 +555,26 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
       return;
     }
 
-    setState(() {
-      _isDownloadingMap = true;
-      _offlineAreaName = areaName;
-    });
+   setState(() {
+  _isDownloadingMap = true;
+  _offlineAreaName = areaName;
+  _offlineDownloadCurrent = 0;
+  _offlineDownloadTotal = 0;
+});
     print('BSL CALLING DOWNLOAD AREA');
 
     final currentZoom = _safeZoom(_currentZoom).round();
     final nextZoom = (currentZoom + 1).clamp(1, 18);
 
     final result = await _offlineMapService.downloadArea(
+      onProgress: (current, total) {
+  if (!mounted) return;
+
+  setState(() {
+    _offlineDownloadCurrent = current;
+    _offlineDownloadTotal = total;
+  });
+},
       centerLat: _mapCenter.latitude,
       centerLng: _mapCenter.longitude,
       zoomLevels: [
@@ -970,7 +982,13 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
                     ),
                   )
                 : const Icon(Icons.download),
-            label: Text(_isDownloadingMap ? 'Preuzimanje...' : 'Skini mapu'),
+            label: Text(
+  _isDownloadingMap
+      ? _offlineDownloadTotal > 0
+          ? 'Preuzimanje $_offlineDownloadCurrent/$_offlineDownloadTotal'
+          : 'Preuzimanje...'
+      : 'Skini mapu',
+),
           ),
         ],
       ),
