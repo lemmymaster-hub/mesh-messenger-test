@@ -32,6 +32,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
   LatLng? _myLocation;
   bool _isDownloadingMap = false;
   String? _offlineAreaName;
+  String _offlineCacheSize = '0 MB';
   String? _offlineTileRootPath;
   int _offlineDownloadCurrent = 0;
   int _offlineDownloadTotal = 0;
@@ -49,6 +50,13 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
     'Hitna',
     'Volonter',
   ];
+  static const Color _bslBg = Color(0xFF081120);
+  static const Color _bslPanel = Color(0xFF101826);
+  static const Color _bslPanel2 = Color(0xFF182335);
+  static const Color _bslCyan = Color(0xFF1E88FF);
+  static const Color _bslGreen = Color(0xFF2EE66B);
+  static const Color _bslRed = Color(0xFFFF4D57);
+  static const Color _bslTextMuted = Color(0xFF9AA4B2);
 
   double? _toDouble(dynamic value) {
     if (value is num) return value.toDouble();
@@ -326,19 +334,34 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
   void initState() {
     super.initState();
 
-    _loadOfflineTileRootPath(); 
+    _loadOfflineTileRootPath();
+    _loadOfflineCacheSize();
     _loadOfflineAreas();
     _loadMyLocation();
   }
-Future<void> _loadOfflineTileRootPath() async {
-  final root = await _offlineMapService.offlineTileRoot();
 
-  if (!mounted) return;
+  Future<void> _loadOfflineTileRootPath() async {
+    final root = await _offlineMapService.offlineTileRoot();
 
-  setState(() {
-    _offlineTileRootPath = root.path;
-  });
-}
+    if (!mounted) return;
+
+    setState(() {
+      _offlineTileRootPath = root.path;
+    });
+  }
+
+  Future<void> _loadOfflineCacheSize() async {
+    final bytes = await _offlineMapService.offlineCacheSizeBytes();
+
+    if (!mounted) return;
+
+    final mb = bytes / (1024 * 1024);
+
+    setState(() {
+      _offlineCacheSize = '${mb.toStringAsFixed(1)} MB';
+    });
+  }
+
   @override
   void dispose() {
     FocusManager.instance.primaryFocus?.unfocus();
@@ -430,6 +453,7 @@ Future<void> _loadOfflineTileRootPath() async {
     });
 
     await _saveOfflineAreas();
+    await _loadOfflineCacheSize();
 
     if (!mounted) return;
 
@@ -565,12 +589,12 @@ Future<void> _loadOfflineTileRootPath() async {
       return;
     }
 
-   setState(() {
-  _isDownloadingMap = true;
-  _offlineAreaName = areaName;
-  _offlineDownloadCurrent = 0;
-  _offlineDownloadTotal = 0;
-});
+    setState(() {
+      _isDownloadingMap = true;
+      _offlineAreaName = areaName;
+      _offlineDownloadCurrent = 0;
+      _offlineDownloadTotal = 0;
+    });
     print('BSL CALLING DOWNLOAD AREA');
 
     final currentZoom = _safeZoom(_currentZoom).round();
@@ -578,25 +602,20 @@ Future<void> _loadOfflineTileRootPath() async {
 
     final result = await _offlineMapService.downloadArea(
       onProgress: (current, total) {
-  if (!mounted) return;
+        if (!mounted) return;
 
-  setState(() {
-    _offlineDownloadCurrent = current;
-    _offlineDownloadTotal = total;
-  });
-},
+        setState(() {
+          _offlineDownloadCurrent = current;
+          _offlineDownloadTotal = total;
+        });
+      },
       centerLat: _mapCenter.latitude,
       centerLng: _mapCenter.longitude,
-      zoomLevels: [
-        currentZoom,
-        nextZoom,
-      ],
+      zoomLevels: [currentZoom, nextZoom],
       radius: 5,
     );
 
-    print(
-      'BSL DOWNLOAD AREA FINISHED: ${result.downloaded}/${result.total}',
-    );
+    print('BSL DOWNLOAD AREA FINISHED: ${result.downloaded}/${result.total}');
 
     final offlineMap = {
       'name': areaName,
@@ -616,6 +635,7 @@ Future<void> _loadOfflineTileRootPath() async {
     });
 
     await _saveOfflineAreas();
+    await _loadOfflineCacheSize();
 
     if (!mounted) return;
 
@@ -830,9 +850,9 @@ Future<void> _loadOfflineTileRootPath() async {
     final sosMarkers = _sosMarkers();
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0E1117),
+      backgroundColor: _bslBg,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF151A23),
+        backgroundColor: _bslPanel,
         title: const Text(
           'BSL Mesh Map',
           style: TextStyle(color: Colors.white),
@@ -842,7 +862,7 @@ Future<void> _loadOfflineTileRootPath() async {
         children: [
           Container(
             padding: const EdgeInsets.all(10),
-            color: const Color(0xFF151A23),
+            color: _bslPanel,
             child: Column(
               children: [
                 TextField(
@@ -877,11 +897,116 @@ Future<void> _loadOfflineTileRootPath() async {
                   },
                 ),
                 const SizedBox(height: 8),
-                Text(
-                  _centerText(),
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [_bslPanel2, _bslPanel],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: _bslCyan.withValues(alpha: 0.22),
+                      width: 1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _bslCyan.withValues(alpha: 0.10),
+                        blurRadius: 18,
+                        spreadRadius: 1,
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 9,
+                            height: 9,
+                            decoration: const BoxDecoration(
+                              color: _bslGreen,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'BSL FIELD MAP',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                          const Spacer(),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _bslGreen.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: _bslGreen.withValues(alpha: 0.35),
+                              ),
+                            ),
+                            child: const Text(
+                              'OFFLINE READY',
+                              style: TextStyle(
+                                color: _bslGreen,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _centerText(),
+                        style: const TextStyle(
+                          color: _bslTextMuted,
+                          fontSize: 11,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '💾 Cache: $_offlineCacheSize',
+                              style: const TextStyle(
+                                color: _bslGreen,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: Text(
+                              _offlineAreaName == null
+                                  ? '🗺️ Sektor: nije odabran'
+                                  : '🗺️ $_offlineAreaName',
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.right,
+                              style: const TextStyle(
+                                color: _bslCyan,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
 
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
@@ -953,12 +1078,12 @@ Future<void> _loadOfflineTileRootPath() async {
               ),
               children: [
                 TileLayer(
-  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-  userAgentPackageName: 'com.example.mesh_messenger_test',
-  tileProvider: _offlineTileRootPath == null
-      ? NetworkTileProvider()
-      : BslOfflineTileProvider(_offlineTileRootPath!),
-),
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.example.mesh_messenger_test',
+                  tileProvider: _offlineTileRootPath == null
+                      ? NetworkTileProvider()
+                      : BslOfflineTileProvider(_offlineTileRootPath!),
+                ),
                 if (myLocationMarkers.isNotEmpty)
                   MarkerLayer(markers: myLocationMarkers),
                 if (userMarkers.isNotEmpty) MarkerLayer(markers: userMarkers),
@@ -996,18 +1121,19 @@ Future<void> _loadOfflineTileRootPath() async {
                   )
                 : const Icon(Icons.download),
             label: Text(
-  _isDownloadingMap
-      ? _offlineDownloadTotal > 0
-          ? 'Preuzimanje $_offlineDownloadCurrent/$_offlineDownloadTotal'
-          : 'Preuzimanje...'
-      : 'Skini mapu',
-),
+              _isDownloadingMap
+                  ? _offlineDownloadTotal > 0
+                        ? 'Preuzimanje $_offlineDownloadCurrent/$_offlineDownloadTotal'
+                        : 'Preuzimanje...'
+                  : 'Skini mapu',
+            ),
           ),
         ],
       ),
     );
   }
 }
+
 class BslOfflineTileProvider extends TileProvider {
   final String rootPath;
 

@@ -15,6 +15,24 @@ class OfflineMapService {
     return root;
   }
 
+  Future<int> offlineCacheSizeBytes() async {
+    final root = await offlineTileRoot();
+
+    if (!await root.exists()) {
+      return 0;
+    }
+
+    int total = 0;
+
+    await for (final entity in root.list(recursive: true)) {
+      if (entity is File) {
+        total += await entity.length();
+      }
+    }
+
+    return total;
+  }
+
   String tileUrl(int z, int x, int y) {
     return 'https://tile.openstreetmap.org/$z/$x/$y.png';
   }
@@ -25,15 +43,17 @@ class OfflineMapService {
     await file.parent.create(recursive: true);
     return file;
   }
-Future<File?> existingTileFile(int z, int x, int y) async {
-  final file = await tileFile(z, x, y);
 
-  if (await file.exists()) {
-    return file;
+  Future<File?> existingTileFile(int z, int x, int y) async {
+    final file = await tileFile(z, x, y);
+
+    if (await file.exists()) {
+      return file;
+    }
+
+    return null;
   }
 
-  return null;
-}
   int lonToTileX(double lon, int zoom) {
     final safeZoom = zoom.clamp(1, 19);
     final tiles = 1 << safeZoom;
@@ -88,10 +108,7 @@ Future<File?> existingTileFile(int z, int x, int y) async {
       _log('BSL TILE URL: $url');
 
       final response = await http
-          .get(
-            Uri.parse(url),
-            headers: {'User-Agent': _userAgent},
-          )
+          .get(Uri.parse(url), headers: {'User-Agent': _userAgent})
           .timeout(const Duration(seconds: 10));
 
       _log('BSL TILE HTTP STATUS: ${response.statusCode}');
@@ -134,8 +151,7 @@ Future<File?> existingTileFile(int z, int x, int y) async {
   }) async {
     final selectedZoomLevels = <int>{
       if (zoom != null) zoom.clamp(1, 19),
-      if (zoomLevels != null)
-        ...zoomLevels.map((item) => item.clamp(1, 19)),
+      if (zoomLevels != null) ...zoomLevels.map((item) => item.clamp(1, 19)),
     }.toList()
       ..sort();
 
@@ -148,10 +164,11 @@ Future<File?> existingTileFile(int z, int x, int y) async {
     int total = 0;
     int success = 0;
     int failed = 0;
-    final totalExpected =
-    selectedZoomLevels.length * (safeRadius * 2 + 1) * (safeRadius * 2 + 1);
 
-int processed = 0;
+    final totalExpected =
+        selectedZoomLevels.length * (safeRadius * 2 + 1) * (safeRadius * 2 + 1);
+
+    int processed = 0;
 
     final zoomResults = <OfflineZoomDownloadResult>[];
 
@@ -177,8 +194,9 @@ int processed = 0;
             zoomFailed++;
             failed++;
           }
+
           processed++;
-onProgress?.call(processed, totalExpected);
+          onProgress?.call(processed, totalExpected);
         }
       }
 
