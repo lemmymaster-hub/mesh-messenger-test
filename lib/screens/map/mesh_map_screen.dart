@@ -1,5 +1,5 @@
 import 'dart:convert';
-
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:http/http.dart' as http;
@@ -32,6 +32,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
   LatLng? _myLocation;
   bool _isDownloadingMap = false;
   String? _offlineAreaName;
+  String? _offlineTileRootPath;
   int _offlineDownloadCurrent = 0;
   int _offlineDownloadTotal = 0;
   List<Map<String, dynamic>> _offlineAreas = [];
@@ -325,10 +326,19 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
   void initState() {
     super.initState();
 
+    _loadOfflineTileRootPath(); 
     _loadOfflineAreas();
     _loadMyLocation();
   }
+Future<void> _loadOfflineTileRootPath() async {
+  final root = await _offlineMapService.offlineTileRoot();
 
+  if (!mounted) return;
+
+  setState(() {
+    _offlineTileRootPath = root.path;
+  });
+}
   @override
   void dispose() {
     FocusManager.instance.primaryFocus?.unfocus();
@@ -943,9 +953,12 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
               ),
               children: [
                 TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.example.mesh_messenger_test',
-                ),
+  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  userAgentPackageName: 'com.example.mesh_messenger_test',
+  tileProvider: _offlineTileRootPath == null
+      ? NetworkTileProvider()
+      : BslOfflineTileProvider(_offlineTileRootPath!),
+),
                 if (myLocationMarkers.isNotEmpty)
                   MarkerLayer(markers: myLocationMarkers),
                 if (userMarkers.isNotEmpty) MarkerLayer(markers: userMarkers),
@@ -993,5 +1006,25 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
         ],
       ),
     );
+  }
+}
+class BslOfflineTileProvider extends TileProvider {
+  final String rootPath;
+
+  BslOfflineTileProvider(this.rootPath);
+
+  @override
+  ImageProvider getImage(TileCoordinates coordinates, TileLayer options) {
+    final z = coordinates.z.round();
+    final x = coordinates.x.round();
+    final y = coordinates.y.round();
+
+    final file = File('$rootPath/$z/$x/$y.png');
+
+    if (file.existsSync()) {
+      return FileImage(file);
+    }
+
+    return NetworkImage('https://tile.openstreetmap.org/$z/$x/$y.png');
   }
 }

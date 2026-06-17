@@ -25,7 +25,15 @@ class OfflineMapService {
     await file.parent.create(recursive: true);
     return file;
   }
+Future<File?> existingTileFile(int z, int x, int y) async {
+  final file = await tileFile(z, x, y);
 
+  if (await file.exists()) {
+    return file;
+  }
+
+  return null;
+}
   int lonToTileX(double lon, int zoom) {
     final safeZoom = zoom.clamp(1, 19);
     final tiles = 1 << safeZoom;
