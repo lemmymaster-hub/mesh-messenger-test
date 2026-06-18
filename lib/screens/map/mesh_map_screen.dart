@@ -38,6 +38,8 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
   int _offlineDownloadTotal = 0;
   List<Map<String, dynamic>> _offlineAreas = [];
   String _selectedRoleFilter = 'Svi';
+  Map<String, dynamic>? _selectedMapUser;
+  String? _selectedMapUserName;
 
   final List<String> _roleFilters = [
     'Svi',
@@ -57,6 +59,11 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
   static const Color _bslGreen = Color(0xFF2EE66B);
   static const Color _bslRed = Color(0xFFFF4D57);
   static const Color _bslTextMuted = Color(0xFF9AA4B2);
+  int get _meshNodeCount => widget.meshUserLocations.length;
+
+  int get _activeSosCount => widget.meshSosLocations.length;
+
+  bool get _offlineReady => _offlineAreas.isNotEmpty;
 
   double? _toDouble(dynamic value) {
     if (value is num) return value.toDouble();
@@ -75,6 +82,130 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
   bool _isValidLatLngObject(LatLng? point) {
     if (point == null) return false;
     return _isValidLatLng(point.latitude, point.longitude);
+  }
+
+  Widget _selectedUserMapPopup() {
+    final user = _selectedMapUser;
+    final name = _selectedMapUserName;
+
+    if (user == null || name == null) {
+      return const SizedBox.shrink();
+    }
+
+    final role = user['role']?.toString() ?? 'Korisnik';
+  final lat = _toDouble(user['lat']);
+  final lng = _toDouble(user['lng']);
+  final battery = _toDouble(user['battery'])?.toInt() ?? 0;
+  final timestamp = _toDouble(user['timestamp'])?.toInt() ?? 0;
+
+  String lastSeenText = 'Nepoznato';
+
+  if (timestamp > 0) {
+    final lastSeen = DateTime.fromMillisecondsSinceEpoch(timestamp);
+    final diff = DateTime.now().difference(lastSeen);
+
+    if (diff.inSeconds < 60) {
+      lastSeenText = 'prije ${diff.inSeconds} sec';
+    } else if (diff.inMinutes < 60) {
+      lastSeenText = 'prije ${diff.inMinutes} min';
+    } else {
+      lastSeenText = 'prije ${diff.inHours} h';
+    }
+  }
+
+  final roleUpper = role.toUpperCase();
+
+  return Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: _bslPanel.withValues(alpha: 0.60),
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(
+        color: _bslCyan.withValues(alpha: 0.35),
+        width: 1,
+      ),
+      boxShadow: [
+        BoxShadow(
+          color: _bslCyan.withValues(alpha: 0.18),
+          blurRadius: 20,
+          spreadRadius: 2,
+        ),
+      ],
+    ),
+    child: Row(
+      children: [
+        Image.asset(
+          _roleMarker(role),
+          width: 42,
+          height: 42,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '$roleUpper $name',
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Container(
+                height: 1,
+                color: _bslCyan.withValues(alpha: 0.25),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                battery > 0 ? '🔋 $battery%' : '🔋 Nepoznato',
+                style: const TextStyle(
+                  color: _bslGreen,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                _isValidLatLng(lat, lng)
+                    ? '📍 ${lat!.toStringAsFixed(5)}, ${lng!.toStringAsFixed(5)}'
+                    : '📍 Lokacija nepoznata',
+                style: const TextStyle(
+                  color: _bslTextMuted,
+                  fontSize: 11,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                '🕒 $lastSeenText',
+                style: const TextStyle(
+                  color: _bslTextMuted,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
+        ),
+        IconButton(
+          onPressed: () {
+            setState(() {
+              _selectedMapUser = null;
+              _selectedMapUserName = null;
+            });
+          },
+          icon: const Icon(
+            Icons.close,
+            color: Colors.white70,
+            size: 20,
+          ),
+        ),
+      ],
+    ),
+  );
   }
 
   double _safeZoom(double zoom) {
@@ -114,6 +245,44 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
         'Zoom: ${_currentZoom.toStringAsFixed(1)}';
   }
 
+  Widget _statusBadge({
+    required String label,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: color.withValues(alpha: 0.35), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.10),
+            blurRadius: 10,
+            spreadRadius: 0.5,
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: color, size: 13),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 9,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _roleMarker(String role) {
     switch (role) {
       case 'Komandant':
@@ -141,94 +310,6 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
       default:
         return 'assets/markers/volonteri.png';
     }
-  }
-
-  void _showMeshUserInfo({
-    required String name,
-    required String role,
-    required double lat,
-    required double lng,
-    required int timestamp,
-    required int battery,
-  }) {
-    final lastSeen = timestamp > 0
-        ? DateTime.fromMillisecondsSinceEpoch(timestamp)
-        : null;
-
-    final String lastSeenText;
-
-    if (lastSeen == null) {
-      lastSeenText = 'Nepoznato';
-    } else {
-      final now = DateTime.now();
-      final diff = now.difference(lastSeen);
-
-      if (diff.inSeconds < 60) {
-        lastSeenText = 'prije ${diff.inSeconds} sekundi';
-      } else if (diff.inMinutes < 60) {
-        lastSeenText = 'prije ${diff.inMinutes} minuta';
-      } else {
-        lastSeenText = 'prije ${diff.inHours} sati';
-      }
-    }
-
-    final Color batteryColor = battery <= 0
-        ? Colors.white54
-        : battery < 20
-        ? Colors.redAccent
-        : battery < 50
-        ? Colors.orangeAccent
-        : Colors.greenAccent;
-
-    final String batteryText = battery > 0
-        ? '🔋 Baterija: $battery%'
-        : '🔋 Baterija: Nepoznato';
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF151A23),
-          title: Text(name, style: const TextStyle(color: Colors.white)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Uloga: $role',
-                style: const TextStyle(color: Colors.white70),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Koordinate: ${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
-                style: const TextStyle(color: Colors.white70),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                batteryText,
-                style: TextStyle(
-                  color: batteryColor,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Zadnji put viđen: $lastSeenText',
-                style: const TextStyle(color: Colors.white70),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop();
-              },
-              child: const Text('Zatvori'),
-            ),
-          ],
-        );
-      },
-    );
   }
 
   void _showSosInfo(MapEntry<String, Map<String, dynamic>> entry) {
@@ -767,14 +848,18 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
             height: 70,
             child: GestureDetector(
               onTap: () {
-                _showMeshUserInfo(
-                  name: entry.key,
-                  role: role,
-                  lat: safeLat,
-                  lng: safeLng,
-                  timestamp: timestamp,
-                  battery: battery,
-                );
+                _safeMoveMap(LatLng(safeLat, safeLng), 17);
+
+                setState(() {
+                  _selectedMapUserName = entry.key;
+                  _selectedMapUser = {
+                    'role': role,
+                    'lat': safeLat,
+                    'lng': safeLng,
+                    'timestamp': timestamp,
+                    'battery': battery,
+                  };
+                });
               },
               child: Column(
                 children: [
@@ -851,50 +936,103 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
 
     return Scaffold(
       backgroundColor: _bslBg,
-      appBar: AppBar(
-        backgroundColor: _bslPanel,
-        title: const Text(
-          'BSL Mesh Map',
-          style: TextStyle(color: Colors.white),
-        ),
-      ),
       body: Column(
         children: [
           Container(
-            padding: const EdgeInsets.all(10),
+            padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
             color: _bslPanel,
             child: Column(
               children: [
-                TextField(
-                  key: const ValueKey('mesh_map_search_field'),
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    hintText: 'Pretraži mjesto...',
-                    hintStyle: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.5),
-                    ),
-                    prefixIcon: const Icon(Icons.search, color: Colors.white70),
-                    suffixIcon: IconButton(
-                      icon: const Icon(
-                        Icons.arrow_forward,
-                        color: Colors.white70,
+                SafeArea(
+                  bottom: false,
+                  child: Row(
+                    children: [
+                      IconButton(
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        icon: const Icon(Icons.arrow_back, color: Colors.white),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 36,
+                          minHeight: 36,
+                        ),
                       ),
-                      onPressed: _searchPlace,
-                    ),
-                    filled: true,
-                    fillColor: const Color(0xFF0E1117),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide.none,
-                    ),
+                      const SizedBox(width: 4),
+                      const Text(
+                        'BSL Mesh',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: SizedBox(
+                          height: 42,
+                          child: TextField(
+                            key: const ValueKey('mesh_map_search_field'),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: 'Pretraži...',
+                              hintStyle: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.45),
+                                fontSize: 13,
+                              ),
+                              prefixIcon: const Icon(
+                                Icons.search,
+                                color: Colors.white70,
+                                size: 19,
+                              ),
+                              suffixIcon: IconButton(
+                                icon: const Icon(
+                                  Icons.arrow_forward,
+                                  color: Colors.white70,
+                                  size: 20,
+                                ),
+                                onPressed: _searchPlace,
+                                padding: EdgeInsets.zero,
+                              ),
+                              filled: true,
+                              fillColor: const Color(0xFF0E1117),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 0,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide.none,
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide(
+                                  color: _bslCyan.withValues(alpha: 0.12),
+                                  width: 1,
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide(
+                                  color: _bslCyan.withValues(alpha: 0.35),
+                                  width: 1,
+                                ),
+                              ),
+                            ),
+                            onChanged: (value) {
+                              _searchQuery = value;
+                            },
+                            onSubmitted: (value) {
+                              _searchQuery = value.trim();
+                              _searchPlace();
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  onChanged: (value) {
-                    _searchQuery = value;
-                  },
-                  onSubmitted: (value) {
-                    _searchQuery = value.trim();
-                    _searchPlace();
-                  },
                 ),
                 const SizedBox(height: 8),
                 Container(
@@ -925,48 +1063,78 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
                       Row(
                         children: [
                           Container(
-                            width: 9,
-                            height: 9,
-                            decoration: const BoxDecoration(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
                               color: _bslGreen,
                               shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: _bslGreen.withValues(alpha: 0.45),
+                                  blurRadius: 10,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text(
+                              'BSL FIELD OPERATIONS',
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.1,
+                              ),
                             ),
                           ),
                           const SizedBox(width: 8),
                           const Text(
-                            'BSL FIELD MAP',
+                            'MAP',
                             style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
+                              color: _bslTextMuted,
+                              fontSize: 10,
                               fontWeight: FontWeight.bold,
-                              letterSpacing: 1.2,
-                            ),
-                          ),
-                          const Spacer(),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _bslGreen.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: _bslGreen.withValues(alpha: 0.35),
-                              ),
-                            ),
-                            child: const Text(
-                              'OFFLINE READY',
-                              style: TextStyle(
-                                color: _bslGreen,
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                              ),
+                              letterSpacing: 1.4,
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _statusBadge(
+                              label: 'MESH ($_meshNodeCount)',
+                              icon: Icons.hub,
+                              color: _bslCyan,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _statusBadge(
+                              label: _offlineReady ? 'OFFLINE' : 'NO MAP',
+                              icon: Icons.map,
+                              color: _offlineReady
+                                  ? _bslGreen
+                                  : Colors.orangeAccent,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _statusBadge(
+                              label: _activeSosCount == 0
+                                  ? 'SOS READY'
+                                  : 'SOS ($_activeSosCount)',
+                              icon: Icons.emergency,
+                              color: _bslRed,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
                       Text(
                         _centerText(),
                         style: const TextStyle(
@@ -1015,14 +1183,33 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
                       return Padding(
                         padding: const EdgeInsets.only(right: 6),
                         child: ChoiceChip(
-                          label: Text(role),
-                          selected: _selectedRoleFilter == role,
-                          onSelected: (_) {
-                            setState(() {
-                              _selectedRoleFilter = role;
-                            });
-                          },
-                        ),
+  label: Text(
+    role,
+    style: TextStyle(
+      color: _selectedRoleFilter == role ? Colors.white : _bslTextMuted,
+      fontSize: 11,
+      fontWeight: FontWeight.w700,
+    ),
+  ),
+  selected: _selectedRoleFilter == role,
+  selectedColor: _bslCyan.withValues(alpha: 0.22),
+  backgroundColor: _bslBg,
+  side: BorderSide(
+    color: _selectedRoleFilter == role
+        ? _bslCyan.withValues(alpha: 0.65)
+        : _bslTextMuted.withValues(alpha: 0.18),
+  ),
+  shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(18),
+  ),
+  visualDensity: VisualDensity.compact,
+  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+  onSelected: (_) {
+    setState(() {
+      _selectedRoleFilter = role;
+    });
+  },
+),
                       );
                     }).toList(),
                   ),
@@ -1044,90 +1231,120 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
             ),
           ),
           Expanded(
-            child: FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                initialCenter: _isValidLatLngObject(_mapCenter)
-                    ? _mapCenter
-                    : const LatLng(43.8167, 18.35),
-                initialZoom: _safeZoom(_currentZoom),
-                onPositionChanged: (position, hasGesture) {
-                  if (!hasGesture) return;
+  child: Stack(
+    children: [
+      FlutterMap(
+        mapController: _mapController,
+        options: MapOptions(
+          initialCenter: _isValidLatLngObject(_mapCenter)
+              ? _mapCenter
+              : const LatLng(43.8167, 18.35),
+          initialZoom: _safeZoom(_currentZoom),
+          onPositionChanged: (position, hasGesture) {
+            if (!hasGesture) return;
 
-                  final center = position.center;
-                  final zoom = _safeZoom(position.zoom);
+            final center = position.center;
+            final zoom = _safeZoom(position.zoom);
 
-                  if (!_isValidLatLngObject(center)) return;
+            if (!_isValidLatLngObject(center)) return;
 
-                  final latDiff = (_mapCenter.latitude - center.latitude).abs();
-                  final lngDiff = (_mapCenter.longitude - center.longitude)
-                      .abs();
-                  final zoomDiff = (_currentZoom - zoom).abs();
+            final latDiff = (_mapCenter.latitude - center.latitude).abs();
+            final lngDiff = (_mapCenter.longitude - center.longitude).abs();
+            final zoomDiff = (_currentZoom - zoom).abs();
 
-                  if (latDiff < 0.00001 &&
-                      lngDiff < 0.00001 &&
-                      zoomDiff < 0.05) {
-                    return;
-                  }
+            if (latDiff < 0.00001 &&
+                lngDiff < 0.00001 &&
+                zoomDiff < 0.05) {
+              return;
+            }
 
-                  setState(() {
-                    _mapCenter = center;
-                    _currentZoom = zoom;
-                  });
-                },
-              ),
-              children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.example.mesh_messenger_test',
-                  tileProvider: _offlineTileRootPath == null
-                      ? NetworkTileProvider()
-                      : BslOfflineTileProvider(_offlineTileRootPath!),
-                ),
-                if (myLocationMarkers.isNotEmpty)
-                  MarkerLayer(markers: myLocationMarkers),
-                if (userMarkers.isNotEmpty) MarkerLayer(markers: userMarkers),
-                if (sosMarkers.isNotEmpty) MarkerLayer(markers: sosMarkers),
-              ],
-            ),
+            setState(() {
+              _mapCenter = center;
+              _currentZoom = zoom;
+            });
+          },
+        ),
+        children: [
+          TileLayer(
+            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            userAgentPackageName: 'com.example.mesh_messenger_test',
+            tileProvider: _offlineTileRootPath == null
+                ? NetworkTileProvider()
+                : BslOfflineTileProvider(_offlineTileRootPath!),
           ),
+          if (myLocationMarkers.isNotEmpty)
+            MarkerLayer(markers: myLocationMarkers),
+          if (userMarkers.isNotEmpty) MarkerLayer(markers: userMarkers),
+          if (sosMarkers.isNotEmpty) MarkerLayer(markers: sosMarkers),
         ],
       ),
-      floatingActionButton: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          FloatingActionButton(
-            heroTag: 'my_location',
-            backgroundColor: Colors.blueAccent,
-            onPressed: () {
-              if (!_isValidLatLngObject(_myLocation)) return;
-              _safeMoveMap(_myLocation!, 15);
-            },
-            child: const Icon(Icons.my_location),
-          ),
-          const SizedBox(height: 10),
-          FloatingActionButton.extended(
-            heroTag: 'download_map',
-            onPressed: _downloadCurrentArea,
-            icon: _isDownloadingMap
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Icon(Icons.download),
-            label: Text(
-              _isDownloadingMap
-                  ? _offlineDownloadTotal > 0
-                        ? 'Preuzimanje $_offlineDownloadCurrent/$_offlineDownloadTotal'
-                        : 'Preuzimanje...'
-                  : 'Skini mapu',
+
+      Positioned(
+        top: 14,
+        right: 14,
+        child: Column(
+          children: [
+            FloatingActionButton.small(
+              heroTag: 'download_map',
+              backgroundColor: _bslPanel.withValues(alpha: 0.88),
+              onPressed: _downloadCurrentArea,
+              child: _isDownloadingMap
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.download, color: Colors.white),
+            ),
+            const SizedBox(height: 10),
+            FloatingActionButton.small(
+              heroTag: 'my_location',
+              backgroundColor: _bslCyan.withValues(alpha: 0.90),
+              onPressed: () {
+                if (!_isValidLatLngObject(_myLocation)) return;
+                _safeMoveMap(_myLocation!, 15);
+              },
+              child: const Icon(Icons.my_location, color: Colors.white),
+            ),
+          ],
+        ),
+      ),
+
+      if (_isDownloadingMap && _offlineDownloadTotal > 0)
+        Positioned(
+          top: 110,
+          right: 14,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.black87,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _bslCyan.withValues(alpha: 0.4)),
+            ),
+            child: Text(
+              '⬇️ $_offlineDownloadCurrent/$_offlineDownloadTotal',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
+        ),
+
+      if (_selectedMapUser != null && _selectedMapUserName != null)
+        Positioned(
+          left: 14,
+          right: 14,
+          bottom: 20,
+          child: _selectedUserMapPopup(),
+        ),
+    ],
+  ),
+),
         ],
       ),
     );
