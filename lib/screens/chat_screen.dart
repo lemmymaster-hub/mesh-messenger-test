@@ -7,6 +7,7 @@ import '../services/nearby_service.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'map/mesh_map_screen.dart';
 import 'package:battery_plus/battery_plus.dart';
+import '../modules/command_center/screens/command_center_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -1666,16 +1667,7 @@ class _ChatScreenState extends State<ChatScreen>
             },
             icon: const Icon(Icons.hub, color: Colors.white),
           ),
-          IconButton(
-            tooltip: 'Start advertising',
-            onPressed: nearbyService.startAdvertising,
-            icon: const Icon(Icons.wifi_tethering, color: Colors.white),
-          ),
-          IconButton(
-            tooltip: 'Start discovery',
-            onPressed: nearbyService.startDiscovery,
-            icon: const Icon(Icons.search, color: Colors.white),
-          ),
+
           IconButton(
             tooltip: 'Mapa',
             onPressed: () {
@@ -1691,11 +1683,20 @@ class _ChatScreenState extends State<ChatScreen>
             },
             icon: const Icon(Icons.map, color: Colors.white),
           ),
-
           IconButton(
-            tooltip: 'Stop',
-            onPressed: nearbyService.stopAll,
-            icon: const Icon(Icons.stop_circle, color: Colors.white),
+            tooltip: 'Command Center',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => CommandCenterScreen(
+                    meshUserLocations: meshUserLocations,
+                    meshSosLocations: meshSosLocations,
+                  ),
+                ),
+              );
+            },
+            icon: const Icon(Icons.dashboard, color: Colors.lightBlueAccent),
           ),
         ],
       ),
