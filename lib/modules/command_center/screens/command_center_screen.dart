@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import '../widgets/command_center_map_panel.dart';
+import '../widgets/teams_panel.dart';
+import '../widgets/dispatch_panel.dart';
+import '../widgets/photo_wall_panel.dart';
 
-class CommandCenterScreen extends StatelessWidget {
+class CommandCenterScreen extends StatefulWidget {
   final Map<String, Map<String, dynamic>> meshUserLocations;
   final Map<String, Map<String, dynamic>> meshSosLocations;
 
@@ -11,6 +14,63 @@ class CommandCenterScreen extends StatelessWidget {
     required this.meshSosLocations,
   });
 
+  @override
+  State<CommandCenterScreen> createState() => _CommandCenterScreenState();
+}
+
+class _CommandCenterScreenState extends State<CommandCenterScreen> {
+  bool isCreatingTeam = false;
+  String pendingTeamName = '';
+  final Set<String> selectedTeamMembers = {};
+Future<void> _showCreateTeamDialog() async {
+  final controller = TextEditingController();
+
+  final teamName = await showDialog<String>(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        backgroundColor: const Color(0xFF111827),
+        title: const Text(
+          'Formiraj tim',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            labelText: 'Naziv tima',
+            labelStyle: TextStyle(color: Colors.white70),
+            hintText: 'npr. Tim ALFA',
+            hintStyle: TextStyle(color: Colors.white38),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Otkaži'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final value = controller.text.trim();
+              if (value.isEmpty) return;
+              Navigator.pop(context, value);
+            },
+            child: const Text('OK'),
+          ),
+        ],
+      );
+    },
+  );
+
+  if (teamName == null || teamName.isEmpty) return;
+
+  setState(() {
+    isCreatingTeam = true;
+    pendingTeamName = teamName;
+    selectedTeamMembers.clear();
+  });
+}
   Widget _statusCard(
     String title,
     String value,
@@ -84,19 +144,19 @@ class CommandCenterScreen extends StatelessWidget {
         children: [
           _statusCard(
             'Korisnici',
-            meshUserLocations.length.toString(),
+            widget.meshUserLocations.length.toString(),
             Colors.greenAccent,
             'assets/icons/korisnici.png',
           ),
           _statusCard(
             'SOS',
-            meshSosLocations.length.toString(),
+            widget.meshSosLocations.length.toString(),
             Colors.redAccent,
             'assets/icons/sos.png',
           ),
           _statusCard(
             'Timovi',
-            '6',
+            '0',
             Colors.blueAccent,
             'assets/icons/timovi.png',
           ),
@@ -132,7 +192,7 @@ class CommandCenterScreen extends StatelessWidget {
   }
 
   Widget _sosCenterPanel() {
-    final sosCount = meshSosLocations.length;
+    final sosCount = widget.meshSosLocations.length;
 
     return Container(
       padding: const EdgeInsets.all(10),
@@ -144,8 +204,8 @@ class CommandCenterScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: const [
+          const Row(
+            children: [
               Icon(Icons.emergency, color: Colors.redAccent, size: 18),
               SizedBox(width: 6),
               Text(
@@ -178,7 +238,7 @@ class CommandCenterScreen extends StatelessWidget {
                     ),
                   )
                 : ListView(
-                    children: meshSosLocations.entries.map((entry) {
+                    children: widget.meshSosLocations.entries.map((entry) {
                       final sos = entry.value;
                       final sender =
                           sos['senderName']?.toString() ?? 'Nepoznat korisnik';
@@ -224,12 +284,25 @@ class CommandCenterScreen extends StatelessWidget {
     );
   }
 
-  Widget _mapPanel() {
-    return CommandCenterMapPanel(
-      meshUserLocations: meshUserLocations,
-      meshSosLocations: meshSosLocations,
-    );
-  }
+ Widget _mapPanel() {
+  return CommandCenterMapPanel(
+    meshUserLocations: widget.meshUserLocations,
+    meshSosLocations: widget.meshSosLocations,
+    isCreatingTeam: isCreatingTeam,
+    selectedTeamMembers: selectedTeamMembers,
+    onUserMarkerTap: (deviceName) {
+      if (!isCreatingTeam) return;
+
+      setState(() {
+        if (selectedTeamMembers.contains(deviceName)) {
+          selectedTeamMembers.remove(deviceName);
+        } else {
+          selectedTeamMembers.add(deviceName);
+        }
+      });
+    },
+  );
+}
 
   Widget _wideLayout() {
     return Column(
@@ -260,20 +333,28 @@ class CommandCenterScreen extends StatelessWidget {
                         child: Row(
                           children: [
                             Expanded(
-                              child: _panel(
-                                'TIMOVI',
-                                Colors.greenAccent,
-                                Icons.groups,
+                              child: TeamsPanel(
+                                meshUserLocations: widget.meshUserLocations,
                               ),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
-                              child: _panel(
-                                'DISPATCH CENTAR',
-                                Colors.blueAccent,
-                                Icons.local_hospital,
-                              ),
-                            ),
+  child: DispatchPanel(
+    isCreatingTeam: isCreatingTeam,
+    pendingTeamName: pendingTeamName,
+    selectedMembersCount: selectedTeamMembers.length,
+    onStartTeamCreation: () {
+  _showCreateTeamDialog();
+},
+    onCancelTeamCreation: () {
+      setState(() {
+        isCreatingTeam = false;
+        pendingTeamName = '';
+        selectedTeamMembers.clear();
+      });
+    },
+  ),
+),
                             const SizedBox(width: 10),
                             Expanded(
                               child: _panel(
@@ -295,12 +376,8 @@ class CommandCenterScreen extends StatelessWidget {
                     children: [
                       Expanded(child: _sosCenterPanel()),
                       const SizedBox(height: 10),
-                      Expanded(
-                        child: _panel(
-                          'FOTO ZID',
-                          Colors.orangeAccent,
-                          Icons.photo_library,
-                        ),
+                      const Expanded(
+                        child: PhotoWallPanel(),
                       ),
                       const SizedBox(height: 10),
                       Expanded(
@@ -333,20 +410,28 @@ class CommandCenterScreen extends StatelessWidget {
                   child: Row(
                     children: [
                       Expanded(
-                        child: _panel(
-                          'TIMOVI',
-                          Colors.greenAccent,
-                          Icons.groups,
+                        child: TeamsPanel(
+                          meshUserLocations: widget.meshUserLocations,
                         ),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
-                        child: _panel(
-                          'DISPATCH CENTAR',
-                          Colors.blueAccent,
-                          Icons.local_hospital,
-                        ),
-                      ),
+  child: DispatchPanel(
+    isCreatingTeam: isCreatingTeam,
+    pendingTeamName: pendingTeamName,
+    selectedMembersCount: selectedTeamMembers.length,
+    onStartTeamCreation: () {
+  _showCreateTeamDialog();
+},
+    onCancelTeamCreation: () {
+      setState(() {
+        isCreatingTeam = false;
+        pendingTeamName = '';
+        selectedTeamMembers.clear();
+      });
+    },
+  ),
+),
                     ],
                   ),
                 ),

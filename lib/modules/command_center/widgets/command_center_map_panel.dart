@@ -5,14 +5,20 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:path_provider/path_provider.dart';
 
+
 class CommandCenterMapPanel extends StatefulWidget {
   final Map<String, Map<String, dynamic>> meshUserLocations;
   final Map<String, Map<String, dynamic>> meshSosLocations;
-
+final bool isCreatingTeam;
+final Set<String> selectedTeamMembers;
+final ValueChanged<String> onUserMarkerTap;
   const CommandCenterMapPanel({
     super.key,
     required this.meshUserLocations,
     required this.meshSosLocations,
+    this.isCreatingTeam = false,
+this.selectedTeamMembers = const {},
+required this.onUserMarkerTap,
   });
 
   @override
@@ -155,22 +161,48 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
 
           final role = (entry.value['role'] ?? 'Volonter').toString();
           final battery = _toDouble(entry.value['battery'])?.toInt() ?? 0;
+          final isSelectedForTeam = widget.selectedTeamMembers.contains(entry.key);
 
           return Marker(
             point: LatLng(lat!, lng!),
             width: 90,
             height: 70,
             child: GestureDetector(
-              onTap: () => _showUserInfo(
-                name: entry.key,
-                role: role,
-                lat: lat,
-                lng: lng,
-                battery: battery,
-              ),
+              onTap: () {
+  if (widget.isCreatingTeam) {
+    widget.onUserMarkerTap(entry.key);
+    return;
+  }
+
+  _showUserInfo(
+    name: entry.key,
+    role: role,
+    lat: lat,
+    lng: lng,
+    battery: battery,
+  );
+},
               child: Column(
                 children: [
-                  Image.asset(_roleMarker(role), width: 42, height: 42),
+                  Container(
+  padding: const EdgeInsets.all(3),
+  decoration: BoxDecoration(
+    shape: BoxShape.circle,
+    border: isSelectedForTeam
+        ? Border.all(color: Colors.blueAccent, width: 3)
+        : null,
+    boxShadow: isSelectedForTeam
+        ? [
+            BoxShadow(
+              color: Colors.blueAccent.withValues(alpha: 0.65),
+              blurRadius: 14,
+              spreadRadius: 3,
+            ),
+          ]
+        : [],
+  ),
+  child: Image.asset(_roleMarker(role), width: 42, height: 42),
+),
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 4,
