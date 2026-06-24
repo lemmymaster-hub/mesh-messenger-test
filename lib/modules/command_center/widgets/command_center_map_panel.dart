@@ -11,6 +11,8 @@ class CommandCenterMapPanel extends StatefulWidget {
   final Map<String, Map<String, dynamic>> meshSosLocations;
 final bool isCreatingTeam;
 final Set<String> selectedTeamMembers;
+final Color pendingTeamColor;
+final Map<String, Color> teamColorsByMember;
 final ValueChanged<String> onUserMarkerTap;
   const CommandCenterMapPanel({
     super.key,
@@ -18,6 +20,8 @@ final ValueChanged<String> onUserMarkerTap;
     required this.meshSosLocations,
     this.isCreatingTeam = false,
 this.selectedTeamMembers = const {},
+this.pendingTeamColor = Colors.blueAccent,
+this.teamColorsByMember = const {},
 required this.onUserMarkerTap,
   });
 
@@ -162,6 +166,10 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
           final role = (entry.value['role'] ?? 'Volonter').toString();
           final battery = _toDouble(entry.value['battery'])?.toInt() ?? 0;
           final isSelectedForTeam = widget.selectedTeamMembers.contains(entry.key);
+          final permanentTeamColor = widget.teamColorsByMember[entry.key];
+final markerGlowColor = isSelectedForTeam
+    ? widget.pendingTeamColor
+    : permanentTeamColor;
 
           return Marker(
             point: LatLng(lat!, lng!),
@@ -188,18 +196,18 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
   padding: const EdgeInsets.all(3),
   decoration: BoxDecoration(
     shape: BoxShape.circle,
-    border: isSelectedForTeam
-        ? Border.all(color: Colors.blueAccent, width: 3)
-        : null,
-    boxShadow: isSelectedForTeam
-        ? [
-            BoxShadow(
-              color: Colors.blueAccent.withValues(alpha: 0.65),
-              blurRadius: 14,
-              spreadRadius: 3,
-            ),
-          ]
-        : [],
+    border: markerGlowColor != null
+    ? Border.all(color: markerGlowColor, width: 3)
+    : null,
+boxShadow: markerGlowColor != null
+    ? [
+        BoxShadow(
+          color: markerGlowColor.withValues(alpha: 0.65),
+          blurRadius: 14,
+          spreadRadius: 3,
+        ),
+      ]
+    : [],
   ),
   child: Image.asset(_roleMarker(role), width: 42, height: 42),
 ),

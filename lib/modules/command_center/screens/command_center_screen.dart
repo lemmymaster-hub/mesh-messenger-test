@@ -3,6 +3,7 @@ import '../widgets/command_center_map_panel.dart';
 import '../widgets/teams_panel.dart';
 import '../widgets/dispatch_panel.dart';
 import '../widgets/photo_wall_panel.dart';
+import '../models/active_team.dart';
 
 class CommandCenterScreen extends StatefulWidget {
   final Map<String, Map<String, dynamic>> meshUserLocations;
@@ -21,56 +22,101 @@ class CommandCenterScreen extends StatefulWidget {
 class _CommandCenterScreenState extends State<CommandCenterScreen> {
   bool isCreatingTeam = false;
   String pendingTeamName = '';
+  String pendingTeamTask = '';
+  Color pendingTeamColor = Colors.blueAccent;
   final Set<String> selectedTeamMembers = {};
-Future<void> _showCreateTeamDialog() async {
-  final controller = TextEditingController();
+  final List<ActiveTeam> activeTeams = [];
 
-  final teamName = await showDialog<String>(
-    context: context,
-    builder: (context) {
-      return AlertDialog(
-        backgroundColor: const Color(0xFF111827),
-        title: const Text(
-          'Formiraj tim',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            labelText: 'Naziv tima',
-            labelStyle: TextStyle(color: Colors.white70),
-            hintText: 'npr. Tim ALFA',
-            hintStyle: TextStyle(color: Colors.white38),
+  Future<void> _showCreateTeamDialog() async {
+    final controller = TextEditingController();
+
+    final teamName = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF111827),
+          title: const Text(
+            'Formiraj tim',
+            style: TextStyle(color: Colors.white),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Otkaži'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(
+              labelText: 'Naziv tima',
+              labelStyle: TextStyle(color: Colors.white70),
+              hintText: 'npr. Tim ALFA',
+              hintStyle: TextStyle(color: Colors.white38),
+            ),
           ),
-          ElevatedButton(
-            onPressed: () {
-              final value = controller.text.trim();
-              if (value.isEmpty) return;
-              Navigator.pop(context, value);
-            },
-            child: const Text('OK'),
-          ),
-        ],
-      );
-    },
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Otkaži'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final value = controller.text.trim();
+                if (value.isEmpty) return;
+                Navigator.pop(context, value);
+              },
+              
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (teamName == null || teamName.isEmpty) return;
+
+    setState(() {
+      isCreatingTeam = true;
+      pendingTeamName = teamName;
+      pendingTeamTask = '';
+      pendingTeamColor = Colors.blueAccent;
+      selectedTeamMembers.clear();
+    });
+  }
+  void _createTeam() {
+  if (selectedTeamMembers.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Moraš odabrati barem jednog člana tima.'),
+      ),
+    );
+    return;
+  }
+
+  final team = ActiveTeam(
+    id: DateTime.now().millisecondsSinceEpoch.toString(),
+    name: pendingTeamName,
+    task: pendingTeamTask,
+    color: pendingTeamColor,
+    members: selectedTeamMembers.toList(),
+    createdAt: DateTime.now(),
   );
 
-  if (teamName == null || teamName.isEmpty) return;
-
   setState(() {
-    isCreatingTeam = true;
-    pendingTeamName = teamName;
+    activeTeams.add(team);
+
+    isCreatingTeam = false;
+    pendingTeamName = '';
+    pendingTeamTask = '';
+    pendingTeamColor = Colors.blueAccent;
     selectedTeamMembers.clear();
   });
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text('${team.name} uspješno formiran'),
+    ),
+  );
 }
+
+  
+
   Widget _statusCard(
     String title,
     String value,
@@ -155,11 +201,11 @@ Future<void> _showCreateTeamDialog() async {
             'assets/icons/sos.png',
           ),
           _statusCard(
-            'Timovi',
-            '0',
-            Colors.blueAccent,
-            'assets/icons/timovi.png',
-          ),
+  'Timovi',
+  activeTeams.length.toString(),
+  Colors.blueAccent,
+  'assets/icons/timovi.png',
+),
           _statusCard(
             'Repetitori',
             '2',
@@ -284,12 +330,17 @@ Future<void> _showCreateTeamDialog() async {
     );
   }
 
- Widget _mapPanel() {
+  Widget _mapPanel() {
   return CommandCenterMapPanel(
     meshUserLocations: widget.meshUserLocations,
     meshSosLocations: widget.meshSosLocations,
     isCreatingTeam: isCreatingTeam,
     selectedTeamMembers: selectedTeamMembers,
+    pendingTeamColor: pendingTeamColor,
+    teamColorsByMember: {
+      for (final team in activeTeams)
+        for (final member in team.members) member: team.color,
+    },
     onUserMarkerTap: (deviceName) {
       if (!isCreatingTeam) return;
 
@@ -303,6 +354,39 @@ Future<void> _showCreateTeamDialog() async {
     },
   );
 }
+
+  Widget _dispatchPanel() {
+    return DispatchPanel(
+      isCreatingTeam: isCreatingTeam,
+      pendingTeamName: pendingTeamName,
+      selectedMembers: selectedTeamMembers.toList(),
+      pendingTeamTask: pendingTeamTask,
+      pendingTeamColor: pendingTeamColor,
+      onTeamTaskChanged: (value) {
+        setState(() {
+          pendingTeamTask = value;
+        });
+      },
+      onTeamColorChanged: (color) {
+        setState(() {
+          pendingTeamColor = color;
+        });
+      },
+      onStartTeamCreation: () {
+        _showCreateTeamDialog();
+      },
+      onCancelTeamCreation: () {
+        setState(() {
+          isCreatingTeam = false;
+          pendingTeamName = '';
+          pendingTeamTask = '';
+          pendingTeamColor = Colors.blueAccent;
+          selectedTeamMembers.clear();
+        });
+      },
+      onConfirmTeamCreation: _createTeam,
+    );
+  }
 
   Widget _wideLayout() {
     return Column(
@@ -334,27 +418,11 @@ Future<void> _showCreateTeamDialog() async {
                           children: [
                             Expanded(
                               child: TeamsPanel(
-                                meshUserLocations: widget.meshUserLocations,
+                                activeTeams: activeTeams,
                               ),
                             ),
                             const SizedBox(width: 10),
-                            Expanded(
-  child: DispatchPanel(
-    isCreatingTeam: isCreatingTeam,
-    pendingTeamName: pendingTeamName,
-    selectedMembersCount: selectedTeamMembers.length,
-    onStartTeamCreation: () {
-  _showCreateTeamDialog();
-},
-    onCancelTeamCreation: () {
-      setState(() {
-        isCreatingTeam = false;
-        pendingTeamName = '';
-        selectedTeamMembers.clear();
-      });
-    },
-  ),
-),
+                            Expanded(child: _dispatchPanel()),
                             const SizedBox(width: 10),
                             Expanded(
                               child: _panel(
@@ -376,9 +444,7 @@ Future<void> _showCreateTeamDialog() async {
                     children: [
                       Expanded(child: _sosCenterPanel()),
                       const SizedBox(height: 10),
-                      const Expanded(
-                        child: PhotoWallPanel(),
-                      ),
+                      const Expanded(child: PhotoWallPanel()),
                       const SizedBox(height: 10),
                       Expanded(
                         child: _panel('MREŽA', Colors.greenAccent, Icons.hub),
@@ -411,27 +477,11 @@ Future<void> _showCreateTeamDialog() async {
                     children: [
                       Expanded(
                         child: TeamsPanel(
-                          meshUserLocations: widget.meshUserLocations,
+                          activeTeams: activeTeams,
                         ),
                       ),
                       const SizedBox(width: 10),
-                      Expanded(
-  child: DispatchPanel(
-    isCreatingTeam: isCreatingTeam,
-    pendingTeamName: pendingTeamName,
-    selectedMembersCount: selectedTeamMembers.length,
-    onStartTeamCreation: () {
-  _showCreateTeamDialog();
-},
-    onCancelTeamCreation: () {
-      setState(() {
-        isCreatingTeam = false;
-        pendingTeamName = '';
-        selectedTeamMembers.clear();
-      });
-    },
-  ),
-),
+                      Expanded(child: _dispatchPanel()),
                     ],
                   ),
                 ),
