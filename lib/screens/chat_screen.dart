@@ -635,6 +635,18 @@ class _ChatScreenState extends State<ChatScreen>
         longitude: position.longitude,
         batteryLevel: _batteryLevel,
       );
+      setState(() {
+  meshUserLocations[nearbyService.deviceName] = {
+    'deviceId': nearbyService.deviceId,
+    'deviceName': nearbyService.deviceName,
+    'role': selectedRole,
+    'lat': position.latitude,
+    'lng': position.longitude,
+    'time': DateTime.now().millisecondsSinceEpoch,
+    'battery': _batteryLevel,
+    'isLocal': true,
+  };
+});
     } catch (e) {
       if (!mounted) return;
 
@@ -1692,6 +1704,7 @@ class _ChatScreenState extends State<ChatScreen>
                   builder: (_) => CommandCenterScreen(
                     meshUserLocations: meshUserLocations,
                     meshSosLocations: meshSosLocations,
+                    batteryLevel: _batteryLevel,
                   ),
                 ),
               );

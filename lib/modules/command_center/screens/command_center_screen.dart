@@ -10,11 +10,13 @@ import '../models/active_team.dart';
 class CommandCenterScreen extends StatefulWidget {
   final Map<String, Map<String, dynamic>> meshUserLocations;
   final Map<String, Map<String, dynamic>> meshSosLocations;
+  final int batteryLevel;
 
   const CommandCenterScreen({
     super.key,
     required this.meshUserLocations,
     required this.meshSosLocations,
+    required this.batteryLevel,
   });
 
   @override
@@ -658,7 +660,11 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
           _hudChip(Icons.groups, activeTeams.length.toString(),
               Colors.orangeAccent),
           _hudChip(Icons.settings_input_antenna, '2', Colors.blueAccent),
-          _hudChip(Icons.battery_full, '98%', Colors.greenAccent),
+          _hudChip(
+  Icons.battery_full,
+  _myBatteryText(),
+  _myBatteryColor(),
+),
         ],
       ),
     );
@@ -700,7 +706,19 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
       ),
     );
   }
+String _myBatteryText() {
+  return widget.batteryLevel > 0 ? '${widget.batteryLevel}%' : '--';
+}
 
+Color _myBatteryColor() {
+  final level = widget.batteryLevel;
+
+  if (level <= 0) return Colors.white54;
+  if (level < 25) return Colors.redAccent;
+  if (level < 50) return Colors.orangeAccent;
+
+  return Colors.greenAccent;
+}
   Widget _mobileMissionCard() {
     final hasMission = activeTeams.isNotEmpty;
     final team = hasMission ? activeTeams.last : null;
