@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -57,8 +58,12 @@ class _ChatScreenState extends State<ChatScreen>
   Timer? sosAlarmStopTimer;
   Timer? locationBroadcastTimer;
   String incomingSosSender = '';
+  String? incomingSosSenderId;
   String incomingSosMessage = '';
   String? incomingSosId;
+  final Set<String> _sosAcceptedBy = {};
+  final Set<String> _sosRejectedBy = {};
+  bool _locationBroadcastInProgress = false;
 
   int _batteryLevel = 0;
   int sosSentCount = 0;
@@ -150,7 +155,7 @@ class _ChatScreenState extends State<ChatScreen>
         await nearbyService.startAdvertising();
         await Future.delayed(const Duration(seconds: 1));
         await nearbyService.startDiscovery();
-        _startLocationBroadcast();
+        _syncLocationBroadcastWithConnections();
       }
 
       setState(() {});
@@ -191,37 +196,56 @@ class _ChatScreenState extends State<ChatScreen>
           });
         };
 
-    nearbyService.onMessageReceived = (message, endpointId, senderName, type) {
+    nearbyService.onMessageReceived = (meshMessage, endpointId) {
       if (!mounted) return;
 
-      final shouldStartSosAlarm = type == 'sos';
+      final message = meshMessage.text;
+      final type = meshMessage.type;
+      final fallbackSenderName = meshMessage.senderId.length >= 8
+          ? meshMessage.senderId.substring(0, 8)
+          : meshMessage.senderId;
+      final senderName = meshMessage.senderName.isEmpty
+          ? fallbackSenderName
+          : meshMessage.senderName;
+      var shouldStartSosAlarm = false;
+      var shouldStopSosAlarm = false;
 
       setState(() {
         if (type == 'sos') {
+          final sosId = meshMessage.sosId ?? meshMessage.messageId;
+          var latitude = meshMessage.latitude;
+          var longitude = meshMessage.longitude;
+
+          if (latitude == null || longitude == null) {
+            final latMatch = RegExp(
+              r'Lokacija: ([\d\.-]+), ([\d\.-]+)',
+            ).firstMatch(message);
+
+            latitude = double.tryParse(latMatch?.group(1) ?? '');
+            longitude = double.tryParse(latMatch?.group(2) ?? '');
+          }
+
           incomingSosActive = true;
           showSosModal = true;
           incomingSosSender = senderName;
+          incomingSosSenderId = meshMessage.senderId;
           incomingSosMessage = message;
-          incomingSosId = DateTime.now().millisecondsSinceEpoch.toString();
-          final latMatch = RegExp(
-            r'Lokacija: ([\d\.-]+), ([\d\.-]+)',
-          ).firstMatch(message);
+          incomingSosId = sosId;
+          shouldStartSosAlarm = true;
 
-          if (latMatch != null) {
-            final lat = double.tryParse(latMatch.group(1) ?? '');
-            final lng = double.tryParse(latMatch.group(2) ?? '');
-
-            if (lat != null && lng != null) {
-              meshSosLocations[senderName] = {
-                'lat': lat,
-                'lng': lng,
-                'time': DateTime.now().millisecondsSinceEpoch,
-                'message': message,
-                'sender': senderName,
-                'status': 'active',
-              };
-            }
+          if (latitude != null && longitude != null) {
+            meshSosLocations[sosId] = {
+              'lat': latitude,
+              'lng': longitude,
+              'time': meshMessage.timestamp,
+              'message': message,
+              'sender': senderName,
+              'senderId': meshMessage.senderId,
+              'sosId': sosId,
+              'status': 'active',
+            };
           }
+
           _setPinnedSosCard(
             status: 'active',
             title: '🆘 AKTIVAN SOS',
@@ -232,51 +256,66 @@ class _ChatScreenState extends State<ChatScreen>
             '🆘 $senderName aktivirao SOS u ${_formatTime(DateTime.now())}',
           );
         } else if (type == 'sos_accept') {
-          if (sosAcceptedCount < sosSentCount) {
-            sosAcceptedCount++;
+          if (activeSosId == null || meshMessage.sosId != activeSosId) {
+            _logs.insert(
+              0,
+              'Ignorisan SOS odgovor za drugi incident: ${meshMessage.sosId}',
+            );
+          } else {
+            _sosRejectedBy.remove(meshMessage.senderId);
+            _sosAcceptedBy.add(meshMessage.senderId);
+            _updateSosResponseCounts();
+            _setPinnedSosCard(
+              status: 'accepted',
+              title: '🚑 POMOĆ NA PUTU',
+              message: '$senderName prihvatio SOS.',
+              sender: senderName,
+            );
+            _addSosPublicLog(
+              '✅ $senderName prihvatio SOS u ${_formatTime(DateTime.now())}',
+            );
           }
-
-          if (sosPendingCount > 0) {
-            sosPendingCount--;
-          }
-          _setPinnedSosCard(
-            status: 'accepted',
-            title: '🚑 POMOĆ NA PUTU',
-            message: '$senderName prihvatio SOS.',
-            sender: senderName,
-          );
-          _addSosPublicLog(
-            '✅ $senderName prihvatio SOS u ${_formatTime(DateTime.now())}',
-          );
         } else if (type == 'sos_cancel') {
-          _stopIncomingSosAlarm();
-          meshSosLocations.removeWhere((key, value) {
-            return key == senderName || value['sender'] == senderName;
-          });
+          final matchesIncomingIncident =
+              incomingSosId != null &&
+              meshMessage.sosId == incomingSosId &&
+              meshMessage.senderId == incomingSosSenderId;
 
-          incomingSosActive = false;
-          sosActive = false;
-          sosAlarmActive = false;
-          activeSosId = null;
-          _setPinnedSosCard(
-            status: 'finished',
-            title: '✅ SOS ZAVRŠEN',
-            message: message,
-            sender: senderName,
-          );
-          _addSosPublicLog(
-            '✅ SOS ZAVRŠEN\n$message u ${_formatTime(DateTime.now())}',
-          );
+          if (!matchesIncomingIncident) {
+            _logs.insert(
+              0,
+              'Ignorisan SOS cancel za drugi incident ili pošiljaoca.',
+            );
+          } else {
+            shouldStopSosAlarm = true;
+            meshSosLocations.remove(incomingSosId);
+            incomingSosActive = false;
+            showSosModal = false;
+            sosAlarmActive = false;
+            incomingSosId = null;
+            incomingSosSenderId = null;
+            _setPinnedSosCard(
+              status: 'finished',
+              title: '✅ SOS ZAVRŠEN',
+              message: message,
+              sender: senderName,
+            );
+            _addSosPublicLog(
+              '✅ SOS ZAVRŠEN\n$message u ${_formatTime(DateTime.now())}',
+            );
+          }
         } else if (type == 'sos_reject') {
-          if (sosRejectedCount < sosSentCount) {
-            sosRejectedCount++;
+          if (activeSosId == null || meshMessage.sosId != activeSosId) {
+            _logs.insert(
+              0,
+              'Ignorisan SOS odgovor za drugi incident: ${meshMessage.sosId}',
+            );
+          } else {
+            _sosAcceptedBy.remove(meshMessage.senderId);
+            _sosRejectedBy.add(meshMessage.senderId);
+            _updateSosResponseCounts();
+            _addSosPublicLog('❌ $message u ${_formatTime(DateTime.now())}');
           }
-
-          if (sosPendingCount > 0) {
-            sosPendingCount--;
-          }
-
-          _addSosPublicLog('❌ $message u ${_formatTime(DateTime.now())}');
         } else if (type == 'private') {
           _privateMessages.add(
             ChatMessage(
@@ -287,9 +326,11 @@ class _ChatScreenState extends State<ChatScreen>
             ),
           );
 
-          selectedPrivateEndpointId = endpointId;
+          selectedPrivateEndpointId = meshMessage.hopCount == 0
+              ? endpointId
+              : null;
           selectedPrivateDeviceName = senderName;
-          selectedPrivateDeviceId = nearbyService.endpointDeviceIds[endpointId];
+          selectedPrivateDeviceId = meshMessage.senderId;
         } else {
           _messages.add(
             ChatMessage(
@@ -306,16 +347,17 @@ class _ChatScreenState extends State<ChatScreen>
         _startIncomingSosAlarm();
       }
 
+      if (shouldStopSosAlarm) {
+        _stopIncomingSosAlarm();
+      }
+
       _scrollToBottom();
     };
 
     nearbyService.onDevicesChanged = () {
       if (!mounted) return;
 
-      if (nearbyService.connectedDevices.isNotEmpty) {
-        _startLocationBroadcast();
-      }
-
+      _syncLocationBroadcastWithConnections();
       setState(() {});
     };
   }
@@ -367,25 +409,23 @@ class _ChatScreenState extends State<ChatScreen>
     pinnedSosTime = _formatTime(DateTime.now());
   }
 
+  void _updateSosResponseCounts() {
+    sosAcceptedCount = _sosAcceptedBy.length;
+    sosRejectedCount = _sosRejectedBy.length;
+    final responseCount = {..._sosAcceptedBy, ..._sosRejectedBy}.length;
+    final remainingDirectResponses = sosSentCount - responseCount;
+    sosPendingCount = remainingDirectResponses > 0
+        ? remainingDirectResponses
+        : 0;
+  }
+
   Future<void> _startIncomingSosAlarm() async {
     sosAlarmRepeatTimer?.cancel();
     sosAlarmStopTimer?.cancel();
 
-    setState(() {
-      sosAlarmActive = true;
-    });
-    _sosPulseController.repeat(reverse: true);
-    await _sosAudioPlayer.setReleaseMode(ReleaseMode.loop);
-    await _sosAudioPlayer.play(AssetSource('sounds/sos_siren.mp3'));
-    _addSosPublicLog('🚨 SOS alarm aktiviran - čeka se reakcija korisnika');
+    await _playIncomingSosAlarmCycle(isRepeat: false);
 
-    sosAlarmStopTimer = Timer(const Duration(seconds: 30), () {
-      if (!mounted) return;
-
-      setState(() {
-        sosAlarmActive = false;
-      });
-    });
+    if (!mounted || !incomingSosActive) return;
 
     sosAlarmRepeatTimer = Timer.periodic(const Duration(minutes: 3), (timer) {
       if (!mounted || !incomingSosActive) {
@@ -393,20 +433,48 @@ class _ChatScreenState extends State<ChatScreen>
         return;
       }
 
+      unawaited(_playIncomingSosAlarmCycle(isRepeat: true));
+    });
+  }
+
+  Future<void> _playIncomingSosAlarmCycle({required bool isRepeat}) async {
+    if (!mounted || !incomingSosActive) return;
+
+    sosAlarmStopTimer?.cancel();
+
+    setState(() {
+      sosAlarmActive = true;
+    });
+
+    _sosPulseController.repeat(reverse: true);
+    await _sosAudioPlayer.stop();
+    if (!mounted || !incomingSosActive) return;
+
+    await _sosAudioPlayer.setReleaseMode(ReleaseMode.loop);
+    if (!mounted || !incomingSosActive) return;
+
+    await _sosAudioPlayer.play(AssetSource('sounds/sos_siren.mp3'));
+    if (!mounted || !incomingSosActive) {
+      await _sosAudioPlayer.stop();
+      return;
+    }
+
+    await HapticFeedback.heavyImpact();
+    _addSosPublicLog(
+      isRepeat
+          ? '🚨 SOS alarm ponovljen - korisnik još nije reagovao'
+          : '🚨 SOS alarm aktiviran - čeka se reakcija korisnika',
+    );
+
+    sosAlarmStopTimer = Timer(const Duration(seconds: 30), () async {
+      await _sosAudioPlayer.stop();
+      if (!mounted) return;
+
       setState(() {
-        sosAlarmActive = true;
+        sosAlarmActive = false;
       });
-
-      _addSosPublicLog('🚨 SOS alarm ponovljen - korisnik još nije reagovao');
-
-      sosAlarmStopTimer?.cancel();
-      sosAlarmStopTimer = Timer(const Duration(seconds: 30), () {
-        if (!mounted) return;
-
-        setState(() {
-          sosAlarmActive = false;
-        });
-      });
+      _sosPulseController.stop();
+      _sosPulseController.reset();
     });
   }
 
@@ -424,7 +492,7 @@ class _ChatScreenState extends State<ChatScreen>
     });
     _sosPulseController.stop();
     _sosPulseController.reset();
-    _sosAudioPlayer.stop();
+    unawaited(_sosAudioPlayer.stop());
   }
 
   Future<void> _loadSelectedRole() async {
@@ -475,7 +543,18 @@ class _ChatScreenState extends State<ChatScreen>
 
   Future<void> _activateSos() async {
     try {
-      LocationPermission permission = await Geolocator.checkPermission();
+      if (nearbyService.connectedDevices.isEmpty) {
+        setState(() {
+          _addSystemMessage(
+            'SOS NIJE POSLAT: nema direktno povezanih mesh uređaja.',
+          );
+        });
+        return;
+      }
+
+      var permission = await Geolocator.checkPermission();
+      String? locationWarning;
+      Position? position;
 
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
@@ -483,30 +562,85 @@ class _ChatScreenState extends State<ChatScreen>
 
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
-        _addSystemMessage('GPS dozvola nije odobrena. SOS nije poslat.');
-        setState(() {});
+        locationWarning =
+            'GPS nije dostupan. SOS će biti poslat bez lokacije.';
+      } else {
+        try {
+          position = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
+          ).timeout(const Duration(seconds: 12));
+        } catch (_) {
+          try {
+            position = await Geolocator.getLastKnownPosition();
+          } catch (_) {
+            position = null;
+          }
+
+          if (position == null) {
+            locationWarning =
+                'GPS lokacija nije pronađena. SOS će biti poslat bez lokacije.';
+          } else {
+            locationWarning =
+                'Korištena je posljednja poznata lokacija za SOS.';
+          }
+        }
+      }
+
+      final sosPosition = position;
+      final resolvedLocationWarning = locationWarning;
+
+      final sendResult = await nearbyService.sendSosMessage(
+        latitude: sosPosition?.latitude,
+        longitude: sosPosition?.longitude,
+      );
+
+      if (!mounted) return;
+
+      if (sendResult == null) {
+        setState(() {
+          if (resolvedLocationWarning != null) {
+            _addSystemMessage(resolvedLocationWarning);
+          }
+          _addSystemMessage(
+            'SOS NIJE ISPORUČEN. Provjeri mesh vezu i pokušaj ponovo.',
+          );
+        });
         return;
       }
 
-      final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
-
-      final connectedCount = nearbyService.connectedDevices.length;
-
       setState(() {
+        if (resolvedLocationWarning != null) {
+          _addSystemMessage(resolvedLocationWarning);
+        }
         sosActive = true;
-        sosSentCount = connectedCount;
+        sosSentCount = sendResult.deliveredCount;
         sosAcceptedCount = 0;
         sosRejectedCount = 0;
-        sosPendingCount = connectedCount;
-        activeSosId = DateTime.now().millisecondsSinceEpoch.toString();
+        sosPendingCount = sendResult.deliveredCount;
+        activeSosId = sendResult.messageId;
+        _sosAcceptedBy.clear();
+        _sosRejectedBy.clear();
+        if (sosPosition != null) {
+          meshSosLocations[sendResult.messageId] = {
+            'lat': sosPosition.latitude,
+            'lng': sosPosition.longitude,
+            'time': DateTime.now().millisecondsSinceEpoch,
+            'message': 'Lokalno aktiviran SOS',
+            'sender': nearbyService.deviceName,
+            'senderId': nearbyService.deviceId,
+            'sosId': sendResult.messageId,
+            'status': 'active',
+          };
+        }
+        final locationDescription = sosPosition == null
+            ? 'Lokacija nije dostupna'
+            : 'Lokacija: ${sosPosition.latitude}, ${sosPosition.longitude}';
         _setPinnedSosCard(
           status: 'active',
           title: '🆘 AKTIVAN SOS',
           message:
               'SOS POSLAT\n'
-              'Lokacija: ${position.latitude}, ${position.longitude}',
+              locationDescription,
           sender: nearbyService.deviceName,
         );
         _messages.insert(
@@ -514,7 +648,7 @@ class _ChatScreenState extends State<ChatScreen>
           ChatMessage(
             text:
                 '🆘 SOS POSLAT\n'
-                'Lokacija: ${position.latitude}, ${position.longitude}\n'
+                '$locationDescription\n'
                 'Vrijeme: ${DateTime.now().toLocal()}',
             isMe: true,
             time: DateTime.now(),
@@ -523,10 +657,7 @@ class _ChatScreenState extends State<ChatScreen>
         );
       });
       _sosPulseController.repeat(reverse: true);
-      await nearbyService.sendSosMessage(
-        latitude: position.latitude,
-        longitude: position.longitude,
-      );
+      await HapticFeedback.heavyImpact();
     } catch (e) {
       _addSystemMessage('Greška pri slanju SOS: $e');
       setState(() {});
@@ -536,16 +667,34 @@ class _ChatScreenState extends State<ChatScreen>
   Future<void> _cancelSos() async {
     if (activeSosId == null) return;
 
-    await nearbyService.sendSosCancel(sosId: activeSosId!);
-
-    _stopIncomingSosAlarm();
+    final sosId = activeSosId!;
+    final sendResult = await nearbyService.sendSosCancel(sosId: sosId);
 
     if (!mounted) return;
 
+    if (sendResult == null) {
+      setState(() {
+        _addSystemMessage(
+          'SOS CANCEL NIJE POSLAT. SOS ostaje aktivan; pokušaj ponovo kada se mesh veza uspostavi.',
+        );
+      });
+      return;
+    }
+
+    if (!incomingSosActive) {
+      _sosPulseController.stop();
+      _sosPulseController.reset();
+    }
+
     setState(() {
       sosActive = false;
-      sosAlarmActive = false;
+      if (!incomingSosActive) {
+        sosAlarmActive = false;
+      }
       activeSosId = null;
+      meshSosLocations.remove(sosId);
+      _sosAcceptedBy.clear();
+      _sosRejectedBy.clear();
 
       sosSentCount = 0;
       sosAcceptedCount = 0;
@@ -598,19 +747,34 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
-  void _startLocationBroadcast() {
-    locationBroadcastTimer?.cancel();
+  void _syncLocationBroadcastWithConnections() {
+    if (nearbyService.connectedDevices.isEmpty) {
+      locationBroadcastTimer?.cancel();
+      locationBroadcastTimer = null;
+      return;
+    }
 
-    _broadcastMyLocation();
+    _startLocationBroadcast();
+  }
+
+  void _startLocationBroadcast() {
+    if (locationBroadcastTimer?.isActive ?? false) return;
+
+    unawaited(_broadcastMyLocation());
 
     locationBroadcastTimer = Timer.periodic(
       const Duration(seconds: 30),
-      (_) => _broadcastMyLocation(),
+      (_) => unawaited(_broadcastMyLocation()),
     );
   }
 
   Future<void> _broadcastMyLocation() async {
-    if (nearbyService.connectedDevices.isEmpty) return;
+    if (nearbyService.connectedDevices.isEmpty ||
+        _locationBroadcastInProgress) {
+      return;
+    }
+
+    _locationBroadcastInProgress = true;
 
     try {
       LocationPermission permission = await Geolocator.checkPermission();
@@ -635,24 +799,29 @@ class _ChatScreenState extends State<ChatScreen>
         longitude: position.longitude,
         batteryLevel: _batteryLevel,
       );
+
+      if (!mounted) return;
+
       setState(() {
-  meshUserLocations[nearbyService.deviceName] = {
-    'deviceId': nearbyService.deviceId,
-    'deviceName': nearbyService.deviceName,
-    'role': selectedRole,
-    'lat': position.latitude,
-    'lng': position.longitude,
-    'time': DateTime.now().millisecondsSinceEpoch,
-    'battery': _batteryLevel,
-    'isLocal': true,
-  };
-});
+        meshUserLocations[nearbyService.deviceName] = {
+          'deviceId': nearbyService.deviceId,
+          'deviceName': nearbyService.deviceName,
+          'role': selectedRole,
+          'lat': position.latitude,
+          'lng': position.longitude,
+          'time': DateTime.now().millisecondsSinceEpoch,
+          'battery': _batteryLevel,
+          'isLocal': true,
+        };
+      });
     } catch (e) {
       if (!mounted) return;
 
       setState(() {
         _logs.insert(0, 'Greška slanja lokacije: $e');
       });
+    } finally {
+      _locationBroadcastInProgress = false;
     }
   }
 
@@ -762,6 +931,54 @@ class _ChatScreenState extends State<ChatScreen>
       },
       child: button,
     );
+  }
+
+  Future<bool> _respondToIncomingSos({
+    required String responseType,
+    String reason = '',
+  }) async {
+    final sosId = incomingSosId;
+    if (sosId == null) return false;
+
+    final result = await nearbyService.sendSosResponse(
+      sosId: sosId,
+      responseType: responseType,
+      reason: reason,
+    );
+
+    if (!mounted) return false;
+
+    if (result == null) {
+      setState(() {
+        _addSystemMessage(
+          'SOS odgovor NIJE ISPORUČEN. Reaguj ponovo kada se mesh veza uspostavi.',
+        );
+      });
+      return false;
+    }
+
+    if (incomingSosId != sosId) return false;
+
+    _stopIncomingSosAlarm();
+
+    setState(() {
+      showSosModal = false;
+      incomingSosActive = false;
+      final action = responseType == 'sos_accept'
+          ? 'prihvatio SOS'
+          : 'odbio SOS${reason.isNotEmpty ? ' - $reason' : ''}';
+      _messages.add(
+        ChatMessage(
+          text:
+              '${nearbyService.deviceName} $action ${_formatTime(DateTime.now())}',
+          isMe: true,
+          time: DateTime.now(),
+          senderName: 'SOS odgovor',
+        ),
+      );
+    });
+
+    return true;
   }
 
   Future<void> _showRejectSosDialog() async {
@@ -875,28 +1092,10 @@ class _ChatScreenState extends State<ChatScreen>
 
     if (result == null || result.isEmpty) return;
 
-    await nearbyService.sendSosResponse(
-      sosId: incomingSosId!,
+    await _respondToIncomingSos(
       responseType: 'sos_reject',
       reason: result,
     );
-
-    if (!mounted) return;
-    _stopIncomingSosAlarm();
-    setState(() {
-      incomingSosActive = false;
-
-      _messages.add(
-        ChatMessage(
-          text:
-              '${nearbyService.deviceName} odbio SOS - $result '
-              '${_formatTime(DateTime.now())}',
-          isMe: true,
-          time: DateTime.now(),
-          senderName: 'SOS odgovor',
-        ),
-      );
-    });
   }
 
   Widget _pinnedSosCard() {
@@ -1017,21 +1216,9 @@ class _ChatScreenState extends State<ChatScreen>
                     Expanded(
                       child: ElevatedButton(
                         onPressed: () async {
-                          if (incomingSosId == null) return;
-
-                          await nearbyService.sendSosResponse(
-                            sosId: incomingSosId!,
+                          await _respondToIncomingSos(
                             responseType: 'sos_accept',
                           );
-
-                          _stopIncomingSosAlarm();
-
-                          if (!mounted) return;
-
-                          setState(() {
-                            showSosModal = false;
-                            incomingSosActive = false;
-                          });
                         },
                         child: const Text('PRIHVATI'),
                       ),
@@ -1103,27 +1290,9 @@ class _ChatScreenState extends State<ChatScreen>
                         padding: EdgeInsets.zero,
                       ),
                       onPressed: () async {
-                        if (incomingSosId == null) return;
-
-                        await nearbyService.sendSosResponse(
-                          sosId: incomingSosId!,
+                        await _respondToIncomingSos(
                           responseType: 'sos_accept',
                         );
-                        _stopIncomingSosAlarm();
-                        setState(() {
-                          incomingSosActive = false;
-
-                          _messages.add(
-                            ChatMessage(
-                              text:
-                                  '${nearbyService.deviceName} prihvatio SOS '
-                                  '${_formatTime(DateTime.now())}',
-                              isMe: true,
-                              time: DateTime.now(),
-                              senderName: 'SOS odgovor',
-                            ),
-                          );
-                        });
                       },
                       child: const Text(
                         'PRIHVATI',
@@ -1177,7 +1346,7 @@ class _ChatScreenState extends State<ChatScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'SOS poslan na $sosSentCount korisnika',
+            'Direktno isporučen na $sosSentCount uređaja',
             style: const TextStyle(
               color: Colors.redAccent,
               fontSize: 12,
@@ -1193,7 +1362,7 @@ class _ChatScreenState extends State<ChatScreen>
             ),
           ),
           Text(
-            'Čeka odgovor $sosPendingCount/$sosSentCount',
+            'Čeka direktni odgovor: $sosPendingCount',
             style: const TextStyle(
               color: Colors.amberAccent,
               fontSize: 12,
@@ -1621,12 +1790,14 @@ class _ChatScreenState extends State<ChatScreen>
 
   @override
   void dispose() {
+    locationBroadcastTimer?.cancel();
+    sosAlarmRepeatTimer?.cancel();
+    sosAlarmStopTimer?.cancel();
     _controller.dispose();
     _nameController.dispose();
     _scrollController.dispose();
     _sosPulseController.dispose();
-    _sosAudioPlayer.dispose();
-    locationBroadcastTimer?.cancel();
+    unawaited(_sosAudioPlayer.dispose());
     nearbyService.dispose();
     super.dispose();
   }
