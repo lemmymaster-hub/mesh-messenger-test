@@ -7,13 +7,33 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/mesh_message.dart';
+import 'processed_message_cache.dart';
+
+typedef MeshMessageReceivedCallback =
+    void Function(MeshMessage message, String receivedFromEndpointId);
+
+class MeshSendResult {
+  const MeshSendResult({
+    required this.messageId,
+    required this.attemptedCount,
+    required this.deliveredCount,
+  });
+
+  final String messageId;
+  final int attemptedCount;
+  final int deliveredCount;
+
+  int get failedCount => attemptedCount - deliveredCount;
+  bool get delivered => deliveredCount > 0;
+}
 
 class NearbyService {
   final uuid = const Uuid();
-  final Set<String> processedMessages = {};
+  final ProcessedMessageCache _processedMessages = ProcessedMessageCache();
 
   final Strategy strategy = Strategy.P2P_CLUSTER;
   final String serviceId = 'bsl.mesh.test';
+  static const int _maxIncomingBytes = 64 * 1024;
 
   String deviceName = '';
   String deviceRole = 'Volonter';
@@ -27,8 +47,7 @@ class NearbyService {
 
   Function(String log)? onLog;
 
-  Function(String message, String endpointId, String senderName, String type)?
-  onMessageReceived;
+  MeshMessageReceivedCallback? onMessageReceived;
 
   Function(
     String deviceId,
@@ -47,6 +66,36 @@ class NearbyService {
 
   String _shortId(String value) {
     return value.length >= 8 ? value.substring(0, 8) : value;
+  }
+
+  Future<MeshSendResult> _sendToConnectedPeers(
+    MeshMessage message, {
+    String? excludeEndpointId,
+    required String logLabel,
+  }) async {
+    final endpointIds = connectedDevices.keys
+        .where((endpointId) => endpointId != excludeEndpointId)
+        .toList(growable: false);
+    final payload = Uint8List.fromList(utf8.encode(message.encode()));
+    var deliveredCount = 0;
+
+    for (final endpointId in endpointIds) {
+      try {
+        await Nearby().sendBytesPayload(endpointId, payload);
+        deliveredCount++;
+        onLog?.call(
+          '$logLabel -> ${connectedDevices[endpointId] ?? endpointId}',
+        );
+      } catch (e) {
+        onLog?.call('$logLabel nije poslat ka $endpointId: $e');
+      }
+    }
+
+    return MeshSendResult(
+      messageId: message.messageId,
+      attemptedCount: endpointIds.length,
+      deliveredCount: deliveredCount,
+    );
   }
 
   Future<void> connectToDevice(String endpointId) async {
@@ -90,12 +139,17 @@ class NearbyService {
       timestamp: DateTime.now().millisecondsSinceEpoch,
     );
 
-    await Nearby().sendBytesPayload(
-      endpointId,
-      Uint8List.fromList(utf8.encode(hello.encode())),
-    );
+    _processedMessages.markIfNew(hello.messageId);
 
-    onLog?.call('HELLO poslat -> $endpointId');
+    try {
+      await Nearby().sendBytesPayload(
+        endpointId,
+        Uint8List.fromList(utf8.encode(hello.encode())),
+      );
+      onLog?.call('HELLO poslat -> $endpointId');
+    } catch (e) {
+      onLog?.call('HELLO nije poslat ka $endpointId: $e');
+    }
   }
 
   Future<String?> loadDeviceName() async {
@@ -253,22 +307,36 @@ class NearbyService {
 
   void _handleIncomingPayload(String endpointId, Uint8List bytes) {
     onLog?.call('PAYLOAD primljen od $endpointId | bytes: ${bytes.length}');
-    final rawData = utf8.decode(bytes);
+
+    if (bytes.length > _maxIncomingBytes) {
+      onLog?.call('Prevelik mesh payload je odbačen.');
+      return;
+    }
+
+    String? rawData;
 
     try {
+      rawData = utf8.decode(bytes, allowMalformed: false);
       final meshMessage = MeshMessage.decode(rawData);
 
-      if (processedMessages.contains(meshMessage.messageId)) {
+      if (!_processedMessages.markIfNew(meshMessage.messageId)) {
         onLog?.call('Dupla poruka ignorisana: ${meshMessage.messageId}');
         return;
       }
 
-      processedMessages.add(meshMessage.messageId);
-
+      var devicesChanged = false;
       if (meshMessage.senderId.isNotEmpty &&
           meshMessage.senderName.isNotEmpty) {
-        knownDevices[meshMessage.senderId] = meshMessage.senderName;
-        knownDeviceRoles[meshMessage.senderId] = meshMessage.senderRole;
+        if (knownDevices[meshMessage.senderId] != meshMessage.senderName) {
+          knownDevices[meshMessage.senderId] = meshMessage.senderName;
+          devicesChanged = true;
+        }
+
+        if (knownDeviceRoles[meshMessage.senderId] !=
+            meshMessage.senderRole) {
+          knownDeviceRoles[meshMessage.senderId] = meshMessage.senderRole;
+          devicesChanged = true;
+        }
 
         onLog?.call(
           'Poznat mesh uređaj: ${meshMessage.senderName} (${meshMessage.senderRole}) | ${_shortId(meshMessage.senderId)} | hop ${meshMessage.hopCount}',
@@ -277,10 +345,19 @@ class NearbyService {
         // Samo direktna poruka sa hopCount 0 smije mijenjati endpoint mapu.
         // Ako je poruka došla preko relay-a, endpointId je zapravo posrednik.
         if (meshMessage.hopCount == 0) {
-          endpointDeviceIds[endpointId] = meshMessage.senderId;
-          connectedDevices[endpointId] = meshMessage.senderName;
-        }
+          if (endpointDeviceIds[endpointId] != meshMessage.senderId) {
+            endpointDeviceIds[endpointId] = meshMessage.senderId;
+            devicesChanged = true;
+          }
 
+          if (connectedDevices[endpointId] != meshMessage.senderName) {
+            connectedDevices[endpointId] = meshMessage.senderName;
+            devicesChanged = true;
+          }
+        }
+      }
+
+      if (devicesChanged) {
         onDevicesChanged?.call();
       }
 
@@ -339,18 +416,7 @@ class NearbyService {
 
       if (isForMe) {
         onLog?.call('Primljena mesh poruka: ${meshMessage.messageId}');
-
-        if (meshMessage.senderName.isNotEmpty && meshMessage.hopCount == 0) {
-          connectedDevices[endpointId] = meshMessage.senderName;
-          onDevicesChanged?.call();
-        }
-
-        onMessageReceived?.call(
-          meshMessage.text,
-          endpointId,
-          meshMessage.senderName.isEmpty ? endpointId : meshMessage.senderName,
-          meshMessage.type,
-        );
+        onMessageReceived?.call(meshMessage, endpointId);
       } else {
         onLog?.call(
           'Relay only: ${meshMessage.type} za ${_shortId(meshMessage.receiverId)} | hop ${meshMessage.hopCount}',
@@ -359,9 +425,29 @@ class NearbyService {
 
       _relayMessage(meshMessage, endpointId);
     } catch (e) {
-      onLog?.call('Primljena stara/string poruka: $rawData');
+      if (rawData != null &&
+          rawData.trim().isNotEmpty &&
+          !rawData.trimLeft().startsWith('{')) {
+        final legacyMessage = MeshMessage(
+          messageId: uuid.v4(),
+          senderId: endpointDeviceIds[endpointId] ?? endpointId,
+          senderName: connectedDevices[endpointId] ??
+              foundDevices[endpointId] ??
+              endpointId,
+          receiverId: 'ALL',
+          text: rawData,
+          type: 'group',
+          hopCount: 0,
+          maxHops: 0,
+          timestamp: DateTime.now().millisecondsSinceEpoch,
+        );
 
-      onMessageReceived?.call(rawData, endpointId, endpointId, 'group');
+        onLog?.call('Primljena kompatibilna stara/string poruka.');
+        onMessageReceived?.call(legacyMessage, endpointId);
+        return;
+      }
+
+      onLog?.call('Neispravan mesh payload odbačen: $e');
     }
   }
 
@@ -376,37 +462,16 @@ class NearbyService {
 
     if (connectedDevices.isEmpty) return;
 
-    final relayedMessage = MeshMessage(
-      messageId: originalMessage.messageId,
-      senderId: originalMessage.senderId,
-      senderName: originalMessage.senderName,
-      senderRole: originalMessage.senderRole,
-      receiverId: originalMessage.receiverId,
-      text: originalMessage.text,
-      type: originalMessage.type,
+    final relayedMessage = originalMessage.copyWith(
       hopCount: originalMessage.hopCount + 1,
-      maxHops: originalMessage.maxHops,
-      timestamp: originalMessage.timestamp,
-      latitude: originalMessage.latitude,
-      longitude: originalMessage.longitude,
-      sosId: originalMessage.sosId,
-      sosReason: originalMessage.sosReason,
     );
 
-    final encodedMessage = relayedMessage.encode();
-
-    for (final endpointId in connectedDevices.keys) {
-      if (endpointId == receivedFromEndpointId) continue;
-
-      await Nearby().sendBytesPayload(
-        endpointId,
-        Uint8List.fromList(utf8.encode(encodedMessage)),
-      );
-
-      onLog?.call(
-        'Relay -> $endpointId | hop ${relayedMessage.hopCount}/${relayedMessage.maxHops}',
-      );
-    }
+    await _sendToConnectedPeers(
+      relayedMessage,
+      excludeEndpointId: receivedFromEndpointId,
+      logLabel:
+          'Relay ${relayedMessage.hopCount}/${relayedMessage.maxHops}',
+    );
   }
 
   void _onConnectionResult(String id, Status status) {
@@ -415,7 +480,6 @@ class NearbyService {
     if (status == Status.CONNECTED) {
       final name = foundDevices[id] ?? connectedDevices[id] ?? id;
 
-      connectedDevices.removeWhere((key, value) => value == name);
       connectedDevices[id] = name;
       foundDevices.remove(id);
 
@@ -426,18 +490,25 @@ class NearbyService {
 
   void _onDisconnected(String id) {
     connectedDevices.remove(id);
+    endpointDeviceIds.remove(id);
     onLog?.call('Prekinuta konekcija: $id');
     onDevicesChanged?.call();
   }
 
-  Future<void> sendSosResponse({
+  Future<MeshSendResult?> sendSosResponse({
     required String sosId,
     required String responseType, // sos_accept ili sos_reject
     String reason = '',
   }) async {
     if (deviceName.isEmpty) {
       onLog?.call('Prvo unesi ime uređaja.');
-      return;
+      return null;
+    }
+
+    if (sosId.trim().isEmpty ||
+        (responseType != 'sos_accept' && responseType != 'sos_reject')) {
+      onLog?.call('Neispravan SOS odgovor nije poslat.');
+      return null;
     }
 
     if (deviceId.isEmpty) {
@@ -446,7 +517,7 @@ class NearbyService {
 
     if (connectedDevices.isEmpty) {
       onLog?.call('Nema povezanih uređaja za SOS odgovor');
-      return;
+      return null;
     }
 
     final text = responseType == 'sos_accept'
@@ -468,28 +539,18 @@ class NearbyService {
       sosReason: reason,
     );
 
-    processedMessages.add(meshMessage.messageId);
-    final encodedMessage = meshMessage.encode();
+    _processedMessages.markIfNew(meshMessage.messageId);
+    final result = await _sendToConnectedPeers(
+      meshMessage,
+      logLabel: 'SOS odgovor $responseType',
+    );
 
-    for (final endpointId in connectedDevices.keys) {
-      try {
-        await Nearby().sendBytesPayload(
-          endpointId,
-          Uint8List.fromList(utf8.encode(encodedMessage)),
-        );
-
-        onLog?.call(
-          'SOS odgovor poslat: $responseType -> ${connectedDevices[endpointId]}',
-        );
-      } catch (e) {
-        onLog?.call('Greška SOS odgovora ka $endpointId: $e');
-      }
-    }
+    return result.delivered ? result : null;
   }
 
-  Future<String?> sendSosMessage({
-    required double latitude,
-    required double longitude,
+  Future<MeshSendResult?> sendSosMessage({
+    double? latitude,
+    double? longitude,
   }) async {
     if (deviceName.isEmpty) {
       onLog?.call('Prvo unesi ime uređaja.');
@@ -507,11 +568,15 @@ class NearbyService {
 
     final sosId = uuid.v4();
 
+    final hasLocation = latitude != null && longitude != null;
+    final locationText = hasLocation
+        ? 'Lokacija: $latitude, $longitude\n'
+              'Google Maps: https://maps.google.com/?q=$latitude,$longitude'
+        : 'Lokacija trenutno nije dostupna.';
     final sosText =
         '🆘 SOS od $deviceName\n'
         'Vrijeme: ${DateTime.now().toLocal()}\n'
-        'Lokacija: $latitude, $longitude\n'
-        'Google Maps: https://maps.google.com/?q=$latitude,$longitude';
+        '$locationText';
 
     final meshMessage = MeshMessage(
       messageId: sosId,
@@ -529,35 +594,30 @@ class NearbyService {
       sosId: sosId,
     );
 
-    processedMessages.add(meshMessage.messageId);
-    final encodedMessage = meshMessage.encode();
+    _processedMessages.markIfNew(meshMessage.messageId);
+    final result = await _sendToConnectedPeers(
+      meshMessage,
+      logLabel: 'SOS',
+    );
 
-    for (final endpointId in connectedDevices.keys) {
-      try {
-        onLog?.call(
-          'SOS slanje ka: ${connectedDevices[endpointId]} | $endpointId',
-        );
-
-        await Nearby().sendBytesPayload(
-          endpointId,
-          Uint8List.fromList(utf8.encode(encodedMessage)),
-        );
-
-        onLog?.call('SOS payload poslat ka: ${connectedDevices[endpointId]}');
-      } catch (e) {
-        onLog?.call('Greška SOS slanja ka $endpointId: $e');
-      }
+    if (!result.delivered) {
+      onLog?.call('SOS nije isporučen nijednom direktnom uređaju.');
+      return null;
     }
 
-    onLog?.call('SOS poslat: $sosId');
-    return sosId;
+    onLog?.call(
+      'SOS poslat: $sosId | ${result.deliveredCount}/${result.attemptedCount}',
+    );
+    return result;
   }
 
-  Future<void> sendSosCancel({required String sosId}) async {
+  Future<MeshSendResult?> sendSosCancel({required String sosId}) async {
     if (deviceName.isEmpty) {
       onLog?.call('Prvo unesi ime uređaja.');
-      return;
+      return null;
     }
+
+    if (sosId.trim().isEmpty) return null;
 
     if (deviceId.isEmpty) {
       await loadOrCreateDeviceId();
@@ -565,7 +625,7 @@ class NearbyService {
 
     if (connectedDevices.isEmpty) {
       onLog?.call('Nema povezanih uređaja za gašenje SOS-a');
-      return;
+      return null;
     }
 
     final meshMessage = MeshMessage(
@@ -582,23 +642,16 @@ class NearbyService {
       sosId: sosId,
     );
 
-    processedMessages.add(meshMessage.messageId);
-    final encodedMessage = meshMessage.encode();
+    _processedMessages.markIfNew(meshMessage.messageId);
+    final result = await _sendToConnectedPeers(
+      meshMessage,
+      logLabel: 'SOS cancel',
+    );
 
-    for (final endpointId in connectedDevices.keys) {
-      try {
-        await Nearby().sendBytesPayload(
-          endpointId,
-          Uint8List.fromList(utf8.encode(encodedMessage)),
-        );
-
-        onLog?.call('SOS ugašen poslato ka: ${connectedDevices[endpointId]}');
-      } catch (e) {
-        onLog?.call('Greška slanja SOS cancel ka $endpointId: $e');
-      }
-    }
+    if (!result.delivered) return null;
 
     onLog?.call('SOS cancel poslat: $sosId');
+    return result;
   }
 
   Future<void> sendPrivateMessage({
@@ -632,15 +685,8 @@ class NearbyService {
       timestamp: DateTime.now().millisecondsSinceEpoch,
     );
 
-    processedMessages.add(meshMessage.messageId);
-    final encodedMessage = meshMessage.encode();
-
-    for (final endpointId in connectedDevices.keys) {
-      await Nearby().sendBytesPayload(
-        endpointId,
-        Uint8List.fromList(utf8.encode(encodedMessage)),
-      );
-    }
+    _processedMessages.markIfNew(meshMessage.messageId);
+    await _sendToConnectedPeers(meshMessage, logLabel: 'Privatna poruka');
 
     onLog?.call(
       'Privatna poruka poslata za receiverId: $receiverDeviceId | ${meshMessage.messageId}',
@@ -675,15 +721,8 @@ class NearbyService {
       timestamp: DateTime.now().millisecondsSinceEpoch,
     );
 
-    processedMessages.add(meshMessage.messageId);
-    final encodedMessage = meshMessage.encode();
-
-    for (final endpointId in connectedDevices.keys) {
-      await Nearby().sendBytesPayload(
-        endpointId,
-        Uint8List.fromList(utf8.encode(encodedMessage)),
-      );
-    }
+    _processedMessages.markIfNew(meshMessage.messageId);
+    await _sendToConnectedPeers(meshMessage, logLabel: 'Grupna poruka');
 
     onLog?.call('Mesh poruka poslata: ${meshMessage.messageId}');
   }
@@ -723,24 +762,11 @@ class NearbyService {
       batteryLevel: batteryLevel,
     );
 
-    processedMessages.add(meshMessage.messageId);
-    final encodedMessage = meshMessage.encode();
-
-    for (final endpointId in connectedDevices.keys) {
-      try {
-        await Nearby().sendBytesPayload(
-          endpointId,
-          Uint8List.fromList(utf8.encode(encodedMessage)),
-        );
-
-        onLog?.call(
-          'Lokacija poslata ka: ${connectedDevices[endpointId]} | '
-          '$latitude, $longitude',
-        );
-      } catch (e) {
-        onLog?.call('Greška slanja lokacije ka $endpointId: $e');
-      }
-    }
+    _processedMessages.markIfNew(meshMessage.messageId);
+    await _sendToConnectedPeers(
+      meshMessage,
+      logLabel: 'Lokacija $latitude, $longitude',
+    );
   }
 
   Future<void> stopAll() async {
@@ -750,6 +776,7 @@ class NearbyService {
 
     foundDevices.clear();
     connectedDevices.clear();
+    endpointDeviceIds.clear();
 
     onLog?.call('Sve zaustavljeno');
     onDevicesChanged?.call();
