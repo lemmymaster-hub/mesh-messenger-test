@@ -1506,34 +1506,21 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _compactDeviceStatusPanel() {
-    final seenNames = <String>{};
-
     final directDevices = nearbyService.connectedDevices.entries.toList();
 
-    final foundDevices = nearbyService.foundDevices.entries.where((entry) {
-      final isConnectedById = nearbyService.connectedDevices.containsKey(
-        entry.key,
-      );
-      final isConnectedByName = nearbyService.connectedDevices.values.contains(
-        entry.value,
-      );
-      final isDuplicateName = seenNames.contains(entry.value);
-
-      if (!isConnectedById && !isConnectedByName && !isDuplicateName) {
-        seenNames.add(entry.value);
-        return true;
-      }
-
-      return false;
-    }).toList();
-
-    final indirectDevices = nearbyService.knownDevices.entries.where((entry) {
-      final isMe = entry.key == nearbyService.deviceId;
-      final isDirect = nearbyService.connectedDevices.values.contains(
-        entry.value,
-      );
-      return !isMe && !isDirect;
-    }).toList();
+    final foundDevices = nearbyService.foundDevices.entries
+        .where(
+          (entry) => !nearbyService.connectedDevices.containsKey(entry.key),
+        )
+        .toList();
+    final directIds = nearbyService.endpointDeviceIds.values.toSet();
+    final indirectDevices = nearbyService.knownDevices.entries
+        .where(
+          (entry) =>
+              entry.key != nearbyService.deviceId &&
+              !directIds.contains(entry.key),
+        )
+        .toList();
 
     final hasAnyDevice =
         directDevices.isNotEmpty ||

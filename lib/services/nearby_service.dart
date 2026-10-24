@@ -48,7 +48,7 @@ class NearbyService extends ChangeNotifier {
 
   final Strategy strategy = Strategy.P2P_CLUSTER;
   final String serviceId = 'bsl.mesh.test';
-  static const int _maxIncomingBytes = 64 * 1024;
+  static const int _maxIncomingBytes = 32 * 1024;
 
   String deviceName = '';
   String deviceRole = 'Volonter';
@@ -93,7 +93,7 @@ class NearbyService extends ChangeNotifier {
         .toList(growable: false);
     final payload = Uint8List.fromList(utf8.encode(message.encode()));
     if (payload.length > _maxIncomingBytes) {
-      throw const FormatException('Poruka prelazi 64 KB.');
+      throw const FormatException('Poruka prelazi 32 KB.');
     }
     var deliveredCount = 0;
 

@@ -953,17 +953,17 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
     await _run(() async {
       final file = await ImagePicker().pickImage(
         source: ImageSource.gallery,
-        maxWidth: 360,
-        maxHeight: 360,
-        imageQuality: 32,
+        maxWidth: 320,
+        maxHeight: 320,
+        imageQuality: 25,
       );
       if (file == null) return 'Odabir otkazan';
       final bytes = await file.readAsBytes();
-      if (bytes.length > 36000 ||
+      if (bytes.length > 20000 ||
           bytes.length < 3 ||
           bytes[0] != 0xff ||
           bytes[1] != 0xd8)
-        return 'Odaberi manju JPEG fotografiju (do 36 KB).';
+        return 'Odaberi manju JPEG fotografiju (do 20 KB).';
       return ops.publish('photo', {
         'id': const Uuid().v4(),
         'bytes': base64Encode(bytes),

@@ -11,7 +11,7 @@ Open the dashboard button in the chat toolbar. On large screens the layout follo
 - Teams and assignments persist locally. Create a team using known device IDs, assign a task with an optional SOS reference, then each member reports acceptance, travel, arrival, completion or rejection on their own device.
 - Offline operational edits remain local until explicitly retransmitted using the detail dialog. Sending is reported as submission to direct links, never as a remote receipt. A member's progress is the explicit response.
 - Group/private communications use the existing relay transport. A private message cannot silently become a broadcast if a peer's HELLO identity is unavailable.
-- Photo wall sends a compressed JPEG up to 36 KB. At most 24 photos and 300 operational messages are kept in the local ledger. All participants must run this version for the new `command` protocol messages; older versions cannot relay that message type.
+- Photo wall sends a compressed JPEG up to 20 KB. At most 24 photos and 300 operational messages are kept in the local ledger. All participants must run this version for the new `command` protocol messages; older versions cannot relay that message type.
 - Resources (repeaters, vehicles, drones and equipment) are a local manual inventory with optional coordinates. They are not measured radio telemetry or hardware controls. Readiness is local to this center.
 - SOS events without GPS stay in the list. Cancellation is applied to the matching incident. Accepting through the command center also silences the matching chat alarm.
 

@@ -118,6 +118,7 @@ class OperationsStore extends ChangeNotifier {
   }
 
   void receive(MeshMessage message) {
+    if (_disposed) return;
     if (!_loaded) {
       _pending.add(message);
       return;
@@ -238,11 +239,11 @@ class OperationsStore extends ChangeNotifier {
       progress[sender] = {'status': body['status'], 'time': time, 'name': name};
       mission['progress'] = progress;
     } else if (op == 'photo') {
-      if (body['bytes'] is! String || (body['bytes'] as String).length > 48000)
+      if (body['bytes'] is! String || (body['bytes'] as String).length > 27000)
         return false;
       final bytes = base64Decode(body['bytes'] as String);
       if (bytes.length < 3 ||
-          bytes.length > 36000 ||
+          bytes.length > 20000 ||
           bytes[0] != 0xff ||
           bytes[1] != 0xd8)
         return false;
