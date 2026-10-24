@@ -3,6 +3,7 @@ import 'dart:convert';
 class MeshMessage {
   static const Set<String> supportedTypes = {
     'group',
+    'command',
     'private',
     'hello',
     'location',
@@ -126,6 +127,17 @@ class MeshMessage {
       throw const FormatException('Neispravna hop vrijednost mesh poruke.');
     }
 
+    final lat = _asDoubleOrNull(json['latitude']);
+    final lng = _asDoubleOrNull(json['longitude']);
+    if ((lat == null) != (lng == null) ||
+        (lat != null && (!lat.isFinite || lat.abs() > 90)) ||
+        (lng != null && (!lng.isFinite || lng.abs() > 180))) {
+      throw const FormatException('Neispravne GPS koordinate.');
+    }
+    final battery = _asIntOrNull(json['batteryLevel']);
+    if (battery != null && (battery < 0 || battery > 100)) {
+      throw const FormatException('Neispravna baterija.');
+    }
     return MeshMessage(
       messageId: messageId,
       senderId: senderId,

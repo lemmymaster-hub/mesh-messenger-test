@@ -1,13 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
+
 import 'dart:async';
+
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/chat_message.dart';
+import '../modules/command_center/services/operations_store.dart';
 import '../services/nearby_service.dart';
+
 import 'package:audioplayers/audioplayers.dart';
+
 import 'map/mesh_map_screen.dart';
+
 import 'package:battery_plus/battery_plus.dart';
+
 import '../modules/command_center/screens/command_center_screen.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -24,6 +32,13 @@ class _ChatScreenState extends State<ChatScreen>
   final ScrollController _scrollController = ScrollController();
 
   late final NearbyService nearbyService;
+  late final OperationsStore _operations;
+  final ValueNotifier<int> _meshLive = ValueNotifier(0);
+  void _changed() {
+    _operations.syncIncidents(meshSosLocations);
+    _meshLive.value++;
+  }
+
   final Battery _battery = Battery();
   late final AnimationController _sosPulseController;
   late final Animation<double> _sosPulseAnimation;
@@ -65,7 +80,7 @@ class _ChatScreenState extends State<ChatScreen>
   final Set<String> _sosRejectedBy = {};
   bool _locationBroadcastInProgress = false;
 
-  int _batteryLevel = 0;
+  int _batteryLevel = -1;
   int sosSentCount = 0;
   int sosAcceptedCount = 0;
   int sosPendingCount = 0;
@@ -108,8 +123,9 @@ class _ChatScreenState extends State<ChatScreen>
                   'Diskonektuj se od: $name',
                   style: const TextStyle(color: Colors.white),
                 ),
-                onTap: () {
+                onTap: () async {
                   Navigator.pop(context);
+                  await nearbyService.disconnect(endpointId);
                 },
               ),
             ],
@@ -132,6 +148,7 @@ class _ChatScreenState extends State<ChatScreen>
       CurvedAnimation(parent: _sosPulseController, curve: Curves.easeInOut),
     );
     nearbyService = NearbyService();
+    _operations = OperationsStore(nearbyService);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final savedName = await nearbyService.loadDeviceName();
@@ -180,8 +197,13 @@ class _ChatScreenState extends State<ChatScreen>
         ) {
           if (!mounted) return;
 
+          if (((meshUserLocations[deviceId]?['time'] as num?)?.toInt() ?? 0) >
+              timestamp)
+            return;
           setState(() {
-            meshUserLocations[deviceName] = {
+            meshUserLocations[deviceId] = {
+              'deviceId': deviceId,
+              'deviceName': deviceName,
               'role': deviceRole,
               'lat': latitude,
               'lng': longitude,
@@ -189,6 +211,7 @@ class _ChatScreenState extends State<ChatScreen>
               'battery': batteryLevel ?? 0,
             };
 
+            _changed();
             _logs.insert(
               0,
               '📍 Lokacija primljena od $deviceName | $latitude, $longitude',
@@ -211,15 +234,15 @@ class _ChatScreenState extends State<ChatScreen>
       var shouldStopSosAlarm = false;
 
       setState(() {
+        if (type == 'command') return;
         if (type == 'sos') {
           final sosId = meshMessage.sosId ?? meshMessage.messageId;
           var latitude = meshMessage.latitude;
           var longitude = meshMessage.longitude;
 
           if (latitude == null || longitude == null) {
-            final latMatch = RegExp(
-              r'Lokacija: ([\d\.-]+), ([\d\.-]+)',
-            ).firstMatch(message);
+            final latMatch = RegExp(r'Lokacija: ([\d\.-]+), ([\d\.-]+)')
+                .firstMatch(message);
 
             latitude = double.tryParse(latMatch?.group(1) ?? '');
             longitude = double.tryParse(latMatch?.group(2) ?? '');
@@ -233,7 +256,7 @@ class _ChatScreenState extends State<ChatScreen>
           incomingSosId = sosId;
           shouldStartSosAlarm = true;
 
-          if (latitude != null && longitude != null) {
+          {
             meshSosLocations[sosId] = {
               'lat': latitude,
               'lng': longitude,
@@ -276,6 +299,11 @@ class _ChatScreenState extends State<ChatScreen>
             );
           }
         } else if (type == 'sos_cancel') {
+          final cancelId = meshMessage.sosId;
+          if (cancelId != null &&
+              meshSosLocations[cancelId]?['senderId'] == meshMessage.senderId) {
+            meshSosLocations.remove(cancelId);
+          }
           final matchesIncomingIncident =
               incomingSosId != null &&
               meshMessage.sosId == incomingSosId &&
@@ -351,6 +379,7 @@ class _ChatScreenState extends State<ChatScreen>
         _stopIncomingSosAlarm();
       }
 
+      _changed();
       _scrollToBottom();
     };
 
@@ -358,6 +387,7 @@ class _ChatScreenState extends State<ChatScreen>
       if (!mounted) return;
 
       _syncLocationBroadcastWithConnections();
+      _changed();
       setState(() {});
     };
   }
@@ -381,6 +411,7 @@ class _ChatScreenState extends State<ChatScreen>
 
       setState(() {
         _batteryLevel = level;
+        _meshLive.value++;
       });
     } catch (_) {}
   }
@@ -562,8 +593,7 @@ class _ChatScreenState extends State<ChatScreen>
 
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
-        locationWarning =
-            'GPS nije dostupan. SOS će biti poslat bez lokacije.';
+        locationWarning = 'GPS nije dostupan. SOS će biti poslat bez lokacije.';
       } else {
         try {
           position = await Geolocator.getCurrentPosition(
@@ -620,10 +650,10 @@ class _ChatScreenState extends State<ChatScreen>
         activeSosId = sendResult.messageId;
         _sosAcceptedBy.clear();
         _sosRejectedBy.clear();
-        if (sosPosition != null) {
+        {
           meshSosLocations[sendResult.messageId] = {
-            'lat': sosPosition.latitude,
-            'lng': sosPosition.longitude,
+            'lat': sosPosition?.latitude,
+            'lng': sosPosition?.longitude,
             'time': DateTime.now().millisecondsSinceEpoch,
             'message': 'Lokalno aktiviran SOS',
             'sender': nearbyService.deviceName,
@@ -632,15 +662,14 @@ class _ChatScreenState extends State<ChatScreen>
             'status': 'active',
           };
         }
+        _changed();
         final locationDescription = sosPosition == null
             ? 'Lokacija nije dostupna'
             : 'Lokacija: ${sosPosition.latitude}, ${sosPosition.longitude}';
         _setPinnedSosCard(
           status: 'active',
           title: '🆘 AKTIVAN SOS',
-          message:
-              'SOS POSLAT\n'
-              locationDescription,
+          message: 'SOS POSLAT\n$locationDescription',
           sender: nearbyService.deviceName,
         );
         _messages.insert(
@@ -693,6 +722,8 @@ class _ChatScreenState extends State<ChatScreen>
       }
       activeSosId = null;
       meshSosLocations.remove(sosId);
+      unawaited(_operations.resolveLocal(sosId));
+      _changed();
       _sosAcceptedBy.clear();
       _sosRejectedBy.clear();
 
@@ -706,44 +737,61 @@ class _ChatScreenState extends State<ChatScreen>
     });
   }
 
+  bool _sendingChat = false;
   Future<void> _sendMessage() async {
+    if (_sendingChat) return;
     final text = _controller.text.trim();
     if (text.isEmpty) return;
-
-    final isPrivateMode = selectedPrivateDeviceName != null;
-
-    setState(() {
-      if (isPrivateMode) {
-        _privateMessages.add(
-          ChatMessage(
-            text: text,
-            isMe: true,
-            time: DateTime.now(),
-            senderName: 'Ja',
+    final privateMode = selectedPrivateDeviceName != null;
+    if (privateMode && selectedPrivateDeviceId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Identitet primaoca još nije poznat. Sačekaj HELLO razmjenu.',
           ),
-        );
-      } else {
-        _messages.add(
-          ChatMessage(
-            text: text,
-            isMe: true,
-            time: DateTime.now(),
-            senderName: 'Ja',
-          ),
-        );
-      }
-    });
-
-    _controller.clear();
-    _scrollToBottom();
-
-    if (isPrivateMode && selectedPrivateDeviceId != null) {
-      await nearbyService.sendPrivateMessage(
-        text: text,
-        receiverDeviceId: selectedPrivateDeviceId!,
+        ),
       );
-    } else {
-      await nearbyService.sendMessage(text);
+      return;
+    }
+    _sendingChat = true;
+    try {
+      final result = privateMode
+          ? await nearbyService.sendPrivateMessage(
+              text: text,
+              receiverDeviceId: selectedPrivateDeviceId!,
+            )
+          : await nearbyService.sendMessage(text);
+      if (!mounted) return;
+      if (result == null || !result.delivered) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Poruka nije poslata. Provjeri mesh veze.'),
+          ),
+        );
+        return;
+      }
+      setState(() {
+        (privateMode ? _privateMessages : _messages).add(
+          ChatMessage(
+            text: text,
+            isMe: true,
+            time: DateTime.now(),
+            senderName: 'Ja',
+          ),
+        );
+        _logs.insert(
+          0,
+          'Poruka predata direktnim vezama: ${result.deliveredCount}/${result.attemptedCount}; prijem nije potvrđen.',
+        );
+      });
+      _controller.clear();
+      _scrollToBottom();
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Poruka nije poslata: $e')));
+    } finally {
+      _sendingChat = false;
     }
   }
 
@@ -803,7 +851,7 @@ class _ChatScreenState extends State<ChatScreen>
       if (!mounted) return;
 
       setState(() {
-        meshUserLocations[nearbyService.deviceName] = {
+        meshUserLocations[nearbyService.deviceId] = {
           'deviceId': nearbyService.deviceId,
           'deviceName': nearbyService.deviceName,
           'role': selectedRole,
@@ -813,6 +861,7 @@ class _ChatScreenState extends State<ChatScreen>
           'battery': _batteryLevel,
           'isLocal': true,
         };
+        _changed();
       });
     } catch (e) {
       if (!mounted) return;
@@ -1092,10 +1141,7 @@ class _ChatScreenState extends State<ChatScreen>
 
     if (result == null || result.isEmpty) return;
 
-    await _respondToIncomingSos(
-      responseType: 'sos_reject',
-      reason: result,
-    );
+    await _respondToIncomingSos(responseType: 'sos_reject', reason: result);
   }
 
   Widget _pinnedSosCard() {
@@ -1290,9 +1336,7 @@ class _ChatScreenState extends State<ChatScreen>
                         padding: EdgeInsets.zero,
                       ),
                       onPressed: () async {
-                        await _respondToIncomingSos(
-                          responseType: 'sos_accept',
-                        );
+                        await _respondToIncomingSos(responseType: 'sos_accept');
                       },
                       child: const Text(
                         'PRIHVATI',
@@ -1798,6 +1842,8 @@ class _ChatScreenState extends State<ChatScreen>
     _scrollController.dispose();
     _sosPulseController.dispose();
     unawaited(_sosAudioPlayer.dispose());
+    _operations.dispose();
+    _meshLive.dispose();
     nearbyService.dispose();
     super.dispose();
   }
@@ -1818,7 +1864,7 @@ class _ChatScreenState extends State<ChatScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'BSL Mesh Chat',
+              'NRN Mesh Chat',
               style: TextStyle(color: Colors.white, fontSize: 18),
             ),
             Text(
@@ -1860,6 +1906,7 @@ class _ChatScreenState extends State<ChatScreen>
                   builder: (_) => MeshMapScreen(
                     meshUserLocations: meshUserLocations,
                     meshSosLocations: meshSosLocations,
+                    live: _meshLive,
                   ),
                 ),
               );
@@ -1875,7 +1922,22 @@ class _ChatScreenState extends State<ChatScreen>
                   builder: (_) => CommandCenterScreen(
                     meshUserLocations: meshUserLocations,
                     meshSosLocations: meshSosLocations,
-                    batteryLevel: _batteryLevel,
+                    batteryLevel: () => _batteryLevel,
+                    transport: nearbyService,
+                    operations: _operations,
+                    live: _meshLive,
+                    onSos: _activateSos,
+                    onCancelSos: _cancelSos,
+                    onOfflineMaps: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => MeshMapScreen(
+                          meshUserLocations: meshUserLocations,
+                          meshSosLocations: meshSosLocations,
+                          live: _meshLive,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               );

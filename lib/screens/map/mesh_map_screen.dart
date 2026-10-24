@@ -1,19 +1,23 @@
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
+
 import '../../services/offline_map_service.dart';
 
 class MeshMapScreen extends StatefulWidget {
+  final Listenable? live;
   final Map<String, Map<String, dynamic>> meshUserLocations;
   final Map<String, Map<String, dynamic>> meshSosLocations;
 
   const MeshMapScreen({
     super.key,
+    this.live,
     required this.meshUserLocations,
     required this.meshSosLocations,
   });
@@ -63,7 +67,8 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
 
   int get _activeSosCount => widget.meshSosLocations.length;
 
-  bool get _offlineReady => _offlineAreas.isNotEmpty;
+  bool get _offlineReady =>
+      _offlineAreas.any((area) => area['complete'] == true);
 
   double? _toDouble(dynamic value) {
     if (value is num) return value.toDouble();
@@ -93,119 +98,99 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
     }
 
     final role = user['role']?.toString() ?? 'Korisnik';
-  final lat = _toDouble(user['lat']);
-  final lng = _toDouble(user['lng']);
-  final battery = _toDouble(user['battery'])?.toInt() ?? 0;
-  final timestamp = _toDouble(user['timestamp'])?.toInt() ?? 0;
+    final lat = _toDouble(user['lat']);
+    final lng = _toDouble(user['lng']);
+    final battery = _toDouble(user['battery'])?.toInt() ?? 0;
+    final timestamp = _toDouble(user['timestamp'])?.toInt() ?? 0;
 
-  String lastSeenText = 'Nepoznato';
+    String lastSeenText = 'Nepoznato';
 
-  if (timestamp > 0) {
-    final lastSeen = DateTime.fromMillisecondsSinceEpoch(timestamp);
-    final diff = DateTime.now().difference(lastSeen);
+    if (timestamp > 0) {
+      final lastSeen = DateTime.fromMillisecondsSinceEpoch(timestamp);
+      final diff = DateTime.now().difference(lastSeen);
 
-    if (diff.inSeconds < 60) {
-      lastSeenText = 'prije ${diff.inSeconds} sec';
-    } else if (diff.inMinutes < 60) {
-      lastSeenText = 'prije ${diff.inMinutes} min';
-    } else {
-      lastSeenText = 'prije ${diff.inHours} h';
+      if (diff.inSeconds < 60) {
+        lastSeenText = 'prije ${diff.inSeconds} sec';
+      } else if (diff.inMinutes < 60) {
+        lastSeenText = 'prije ${diff.inMinutes} min';
+      } else {
+        lastSeenText = 'prije ${diff.inHours} h';
+      }
     }
-  }
 
-  final roleUpper = role.toUpperCase();
+    final roleUpper = role.toUpperCase();
 
-  return Container(
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: _bslPanel.withValues(alpha: 0.60),
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(
-        color: _bslCyan.withValues(alpha: 0.35),
-        width: 1,
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _bslPanel.withValues(alpha: 0.60),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _bslCyan.withValues(alpha: 0.35), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: _bslCyan.withValues(alpha: 0.18),
+            blurRadius: 20,
+            spreadRadius: 2,
+          ),
+        ],
       ),
-      boxShadow: [
-        BoxShadow(
-          color: _bslCyan.withValues(alpha: 0.18),
-          blurRadius: 20,
-          spreadRadius: 2,
-        ),
-      ],
-    ),
-    child: Row(
-      children: [
-        Image.asset(
-          _roleMarker(role),
-          width: 42,
-          height: 42,
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '$roleUpper $name',
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.5,
+      child: Row(
+        children: [
+          Image.asset(_roleMarker(role), width: 42, height: 42),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '$roleUpper $name',
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.5,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 4),
-              Container(
-                height: 1,
-                color: _bslCyan.withValues(alpha: 0.25),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                battery > 0 ? '🔋 $battery%' : '🔋 Nepoznato',
-                style: const TextStyle(
-                  color: _bslGreen,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
+                const SizedBox(height: 4),
+                Container(height: 1, color: _bslCyan.withValues(alpha: 0.25)),
+                const SizedBox(height: 6),
+                Text(
+                  battery > 0 ? '🔋 $battery%' : '🔋 Nepoznato',
+                  style: const TextStyle(
+                    color: _bslGreen,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                _isValidLatLng(lat, lng)
-                    ? '📍 ${lat!.toStringAsFixed(5)}, ${lng!.toStringAsFixed(5)}'
-                    : '📍 Lokacija nepoznata',
-                style: const TextStyle(
-                  color: _bslTextMuted,
-                  fontSize: 11,
+                const SizedBox(height: 3),
+                Text(
+                  _isValidLatLng(lat, lng)
+                      ? '📍 ${lat!.toStringAsFixed(5)}, ${lng!.toStringAsFixed(5)}'
+                      : '📍 Lokacija nepoznata',
+                  style: const TextStyle(color: _bslTextMuted, fontSize: 11),
                 ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                '🕒 $lastSeenText',
-                style: const TextStyle(
-                  color: _bslTextMuted,
-                  fontSize: 11,
+                const SizedBox(height: 3),
+                Text(
+                  '🕒 $lastSeenText',
+                  style: const TextStyle(color: _bslTextMuted, fontSize: 11),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-        IconButton(
-          onPressed: () {
-            setState(() {
-              _selectedMapUser = null;
-              _selectedMapUserName = null;
-            });
-          },
-          icon: const Icon(
-            Icons.close,
-            color: Colors.white70,
-            size: 20,
+          IconButton(
+            onPressed: () {
+              setState(() {
+                _selectedMapUser = null;
+                _selectedMapUserName = null;
+              });
+            },
+            icon: const Icon(Icons.close, color: Colors.white70, size: 20),
           ),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
   }
 
   double _safeZoom(double zoom) {
@@ -414,6 +399,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
   @override
   void initState() {
     super.initState();
+    widget.live?.addListener(_refresh);
 
     _loadOfflineTileRootPath();
     _loadOfflineCacheSize();
@@ -443,9 +429,15 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
     });
   }
 
+  void _refresh() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    widget.live?.removeListener(_refresh);
     FocusManager.instance.primaryFocus?.unfocus();
+    _mapController.dispose();
     super.dispose();
   }
 
@@ -494,11 +486,11 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
         return AlertDialog(
           backgroundColor: const Color(0xFF151A23),
           title: const Text(
-            'Obrisati offline mapu?',
+            'Ukloniti područje iz liste?',
             style: TextStyle(color: Colors.white),
           ),
           content: Text(
-            areaName,
+            '$areaName\nPločice ostaju u zajedničkom kešu.',
             style: const TextStyle(color: Colors.white70),
           ),
           actions: [
@@ -523,7 +515,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
       },
     );
 
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
 
     setState(() {
       _offlineAreas.removeWhere((item) => item['name'] == areaName);
@@ -538,9 +530,9 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
 
     if (!mounted) return;
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('Offline mapa obrisana: $areaName')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Područje uklonjeno iz liste: $areaName')),
+    );
   }
 
   Future<void> _searchPlace() async {
@@ -557,10 +549,9 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
         'limit': '1',
       });
 
-      final response = await http.get(
-        uri,
-        headers: {'User-Agent': 'BSL Mesh Lite / mesh_messenger_test'},
-      );
+      final response = await http
+          .get(uri, headers: {'User-Agent': 'NRN Mesh / mesh_messenger_test'})
+          .timeout(const Duration(seconds: 15));
 
       if (response.statusCode != 200) {
         throw Exception('Greška servera: ${response.statusCode}');
@@ -590,21 +581,19 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Mapa premještena na: $query')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Mapa premještena na: $query')));
     } catch (e) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Greška pretrage: $e')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Greška pretrage: $e')));
     }
   }
 
   Future<void> _downloadCurrentArea() async {
     if (_isDownloadingMap) return;
-    print('BSL DOWNLOAD MAP START');
+
     if (!_isValidLatLngObject(_mapCenter)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -666,7 +655,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
       },
     );
 
-    if (areaName == null || areaName.isEmpty) {
+    if (!mounted || areaName == null || areaName.isEmpty) {
       return;
     }
 
@@ -676,8 +665,8 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
       _offlineDownloadCurrent = 0;
       _offlineDownloadTotal = 0;
     });
-    print('BSL CALLING DOWNLOAD AREA');
 
+    final downloadCenter = _mapCenter;
     final currentZoom = _safeZoom(_currentZoom).round();
     final nextZoom = (currentZoom + 1).clamp(1, 18);
 
@@ -690,20 +679,20 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
           _offlineDownloadTotal = total;
         });
       },
-      centerLat: _mapCenter.latitude,
-      centerLng: _mapCenter.longitude,
+      centerLat: downloadCenter.latitude,
+      centerLng: downloadCenter.longitude,
       zoomLevels: [currentZoom, nextZoom],
       radius: 5,
     );
 
-    print('BSL DOWNLOAD AREA FINISHED: ${result.downloaded}/${result.total}');
-
+    if (!mounted) return;
     final offlineMap = {
       'name': areaName,
-      'lat': _mapCenter.latitude,
-      'lng': _mapCenter.longitude,
+      'lat': downloadCenter.latitude,
+      'lng': downloadCenter.longitude,
       'zoom': _safeZoom(_currentZoom),
       'tileCache': true,
+      'complete': result.isComplete,
       'downloadedTiles': result.downloaded,
       'totalTiles': result.total,
       'createdAt': DateTime.now().toIso8601String(),
@@ -723,7 +712,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'Offline mapa sačuvana: $areaName (${result.downloaded}/${result.total} tileova)',
+          'Preuzimanje: $areaName (${result.downloaded}/${result.total} pločica). ${result.isComplete ? 'Područje je kompletno.' : 'Područje NIJE kompletno.'}',
         ),
       ),
     );
@@ -851,7 +840,8 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
                 _safeMoveMap(LatLng(safeLat, safeLng), 17);
 
                 setState(() {
-                  _selectedMapUserName = entry.key;
+                  _selectedMapUserName =
+                      entry.value['deviceName']?.toString() ?? entry.key;
                   _selectedMapUser = {
                     'role': role,
                     'lat': safeLat,
@@ -874,7 +864,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
-                      entry.key,
+                      entry.value['deviceName']?.toString() ?? entry.key,
                       style: const TextStyle(color: Colors.white, fontSize: 10),
                     ),
                   ),
@@ -1183,33 +1173,36 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
                       return Padding(
                         padding: const EdgeInsets.only(right: 6),
                         child: ChoiceChip(
-  label: Text(
-    role,
-    style: TextStyle(
-      color: _selectedRoleFilter == role ? Colors.white : _bslTextMuted,
-      fontSize: 11,
-      fontWeight: FontWeight.w700,
-    ),
-  ),
-  selected: _selectedRoleFilter == role,
-  selectedColor: _bslCyan.withValues(alpha: 0.22),
-  backgroundColor: _bslBg,
-  side: BorderSide(
-    color: _selectedRoleFilter == role
-        ? _bslCyan.withValues(alpha: 0.65)
-        : _bslTextMuted.withValues(alpha: 0.18),
-  ),
-  shape: RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(18),
-  ),
-  visualDensity: VisualDensity.compact,
-  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-  onSelected: (_) {
-    setState(() {
-      _selectedRoleFilter = role;
-    });
-  },
-),
+                          label: Text(
+                            role,
+                            style: TextStyle(
+                              color: _selectedRoleFilter == role
+                                  ? Colors.white
+                                  : _bslTextMuted,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          selected: _selectedRoleFilter == role,
+                          selectedColor: _bslCyan.withValues(alpha: 0.22),
+                          backgroundColor: _bslBg,
+                          side: BorderSide(
+                            color: _selectedRoleFilter == role
+                                ? _bslCyan.withValues(alpha: 0.65)
+                                : _bslTextMuted.withValues(alpha: 0.18),
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          onSelected: (_) {
+                            setState(() {
+                              _selectedRoleFilter = role;
+                            });
+                          },
+                        ),
                       );
                     }).toList(),
                   ),
@@ -1231,120 +1224,132 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
             ),
           ),
           Expanded(
-  child: Stack(
-    children: [
-      FlutterMap(
-        mapController: _mapController,
-        options: MapOptions(
-          initialCenter: _isValidLatLngObject(_mapCenter)
-              ? _mapCenter
-              : const LatLng(43.8167, 18.35),
-          initialZoom: _safeZoom(_currentZoom),
-          onPositionChanged: (position, hasGesture) {
-            if (!hasGesture) return;
+            child: Stack(
+              children: [
+                FlutterMap(
+                  mapController: _mapController,
+                  options: MapOptions(
+                    initialCenter: _isValidLatLngObject(_mapCenter)
+                        ? _mapCenter
+                        : const LatLng(43.8167, 18.35),
+                    initialZoom: _safeZoom(_currentZoom),
+                    onPositionChanged: (position, hasGesture) {
+                      if (!hasGesture) return;
 
-            final center = position.center;
-            final zoom = _safeZoom(position.zoom);
+                      final center = position.center;
+                      final zoom = _safeZoom(position.zoom);
 
-            if (!_isValidLatLngObject(center)) return;
+                      if (!_isValidLatLngObject(center)) return;
 
-            final latDiff = (_mapCenter.latitude - center.latitude).abs();
-            final lngDiff = (_mapCenter.longitude - center.longitude).abs();
-            final zoomDiff = (_currentZoom - zoom).abs();
+                      final latDiff = (_mapCenter.latitude - center.latitude)
+                          .abs();
+                      final lngDiff = (_mapCenter.longitude - center.longitude)
+                          .abs();
+                      final zoomDiff = (_currentZoom - zoom).abs();
 
-            if (latDiff < 0.00001 &&
-                lngDiff < 0.00001 &&
-                zoomDiff < 0.05) {
-              return;
-            }
+                      if (latDiff < 0.00001 &&
+                          lngDiff < 0.00001 &&
+                          zoomDiff < 0.05) {
+                        return;
+                      }
 
-            setState(() {
-              _mapCenter = center;
-              _currentZoom = zoom;
-            });
-          },
-        ),
-        children: [
-          TileLayer(
-            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            userAgentPackageName: 'com.example.mesh_messenger_test',
-            tileProvider: _offlineTileRootPath == null
-                ? NetworkTileProvider()
-                : BslOfflineTileProvider(_offlineTileRootPath!),
-          ),
-          if (myLocationMarkers.isNotEmpty)
-            MarkerLayer(markers: myLocationMarkers),
-          if (userMarkers.isNotEmpty) MarkerLayer(markers: userMarkers),
-          if (sosMarkers.isNotEmpty) MarkerLayer(markers: sosMarkers),
-        ],
-      ),
+                      setState(() {
+                        _mapCenter = center;
+                        _currentZoom = zoom;
+                      });
+                    },
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate:
+                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.example.mesh_messenger_test',
+                      tileProvider: _offlineTileRootPath == null
+                          ? NetworkTileProvider()
+                          : BslOfflineTileProvider(_offlineTileRootPath!),
+                    ),
+                    if (myLocationMarkers.isNotEmpty)
+                      MarkerLayer(markers: myLocationMarkers),
+                    if (userMarkers.isNotEmpty)
+                      MarkerLayer(markers: userMarkers),
+                    if (sosMarkers.isNotEmpty) MarkerLayer(markers: sosMarkers),
+                  ],
+                ),
 
-      Positioned(
-        top: 14,
-        right: 14,
-        child: Column(
-          children: [
-            FloatingActionButton.small(
-              heroTag: 'download_map',
-              backgroundColor: _bslPanel.withValues(alpha: 0.88),
-              onPressed: _downloadCurrentArea,
-              child: _isDownloadingMap
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
+                Positioned(
+                  top: 14,
+                  right: 14,
+                  child: Column(
+                    children: [
+                      FloatingActionButton.small(
+                        heroTag: 'download_map',
+                        backgroundColor: _bslPanel.withValues(alpha: 0.88),
+                        onPressed: _downloadCurrentArea,
+                        child: _isDownloadingMap
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.download, color: Colors.white),
                       ),
-                    )
-                  : const Icon(Icons.download, color: Colors.white),
-            ),
-            const SizedBox(height: 10),
-            FloatingActionButton.small(
-              heroTag: 'my_location',
-              backgroundColor: _bslCyan.withValues(alpha: 0.90),
-              onPressed: () {
-                if (!_isValidLatLngObject(_myLocation)) return;
-                _safeMoveMap(_myLocation!, 15);
-              },
-              child: const Icon(Icons.my_location, color: Colors.white),
-            ),
-          ],
-        ),
-      ),
+                      const SizedBox(height: 10),
+                      FloatingActionButton.small(
+                        heroTag: 'my_location',
+                        backgroundColor: _bslCyan.withValues(alpha: 0.90),
+                        onPressed: () {
+                          if (!_isValidLatLngObject(_myLocation)) return;
+                          _safeMoveMap(_myLocation!, 15);
+                        },
+                        child: const Icon(
+                          Icons.my_location,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
 
-      if (_isDownloadingMap && _offlineDownloadTotal > 0)
-        Positioned(
-          top: 110,
-          right: 14,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.black87,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _bslCyan.withValues(alpha: 0.4)),
-            ),
-            child: Text(
-              '⬇️ $_offlineDownloadCurrent/$_offlineDownloadTotal',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-              ),
+                if (_isDownloadingMap && _offlineDownloadTotal > 0)
+                  Positioned(
+                    top: 110,
+                    right: 14,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black87,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: _bslCyan.withValues(alpha: 0.4),
+                        ),
+                      ),
+                      child: Text(
+                        '⬇️ $_offlineDownloadCurrent/$_offlineDownloadTotal',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                if (_selectedMapUser != null && _selectedMapUserName != null)
+                  Positioned(
+                    left: 14,
+                    right: 14,
+                    bottom: 20,
+                    child: _selectedUserMapPopup(),
+                  ),
+              ],
             ),
           ),
-        ),
-
-      if (_selectedMapUser != null && _selectedMapUserName != null)
-        Positioned(
-          left: 14,
-          right: 14,
-          bottom: 20,
-          child: _selectedUserMapPopup(),
-        ),
-    ],
-  ),
-),
         ],
       ),
     );
