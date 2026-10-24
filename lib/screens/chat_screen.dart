@@ -1091,7 +1091,8 @@ class _ChatScreenState extends State<ChatScreen>
       return false;
     }
 
-    if (incomingSosId != sosId) {
+    await _operations.recordSosResponse(sosId, responseType);
+    if (!mounted || incomingSosId != sosId) {
       return false;
     }
 

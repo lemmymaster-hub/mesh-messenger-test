@@ -874,6 +874,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
     if (!recipients.containsKey(_recipient)) {
       _recipient = null;
     }
+    final messages = ops.conversation(_recipient);
     return _box(
       'Komunikacije',
       Column(
