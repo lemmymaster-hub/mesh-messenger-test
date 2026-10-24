@@ -137,10 +137,10 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
       ),
     ),
   );
-  Widget _box(String title, Widget child, {Widget? action}) => Container(
-    decoration: BoxDecoration(
-      color: panel,
-      border: Border.all(color: line),
+  Widget _box(String title, Widget child, {Widget? action}) => Material(
+    color: panel,
+    shape: RoundedRectangleBorder(
+      side: const BorderSide(color: line),
       borderRadius: BorderRadius.circular(7),
     ),
     child: Column(

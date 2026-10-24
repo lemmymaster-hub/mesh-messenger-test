@@ -19,6 +19,9 @@ void main() {
       const MethodChannel('plugins.flutter.io/path_provider'),
       (_) async => cache.path,
     );
+    final icons = FontLoader('MaterialIcons')
+      ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
+    await icons.load();
     final fontFile = File('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf');
     if (fontFile.existsSync()) {
       final loader = FontLoader('ReviewSans')
@@ -48,11 +51,17 @@ void main() {
         final screenshotKey = GlobalKey();
         await tester.pumpWidget(
           MaterialApp(
-            theme: ThemeData.dark().copyWith(
-              textTheme: ThemeData.dark().textTheme.apply(
-                fontFamily: 'ReviewSans',
-              ),
-            ),
+            theme:
+                ThemeData(
+                  colorScheme: ColorScheme.fromSeed(
+                    seedColor: const Color(0xFF1687FF),
+                    brightness: Brightness.dark,
+                  ),
+                ).copyWith(
+                  textTheme: ThemeData.dark().textTheme.apply(
+                    fontFamily: 'ReviewSans',
+                  ),
+                ),
             home: RepaintBoundary(
               key: screenshotKey,
               child: CommandCenterScreen(
