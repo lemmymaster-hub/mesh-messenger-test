@@ -232,6 +232,19 @@ void main() {
         await tester.tap(find.text(tab).first);
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull, reason: 'Console $tab at $size');
+        if (tab == 'Komunikacije') {
+          await tester.tap(find.byType(TextField).first);
+          await tester.pumpAndSettle();
+          expect(find.text('Broadcast poruka'), findsOneWidget);
+          await tester.enterText(find.byType(TextField).last, 'Terenski izvještaj');
+          tester.view.viewInsets = const FakeViewPadding(bottom: 160);
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull, reason: 'Message composer with keyboard at $size');
+          tester.view.resetViewInsets();
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Nazad'));
+          await tester.pumpAndSettle();
+        }
       }
       expect(find.byTooltip('Nazad u chat'), findsOneWidget);
       expect(find.text('OFFLINE MAPE'), findsOneWidget);
