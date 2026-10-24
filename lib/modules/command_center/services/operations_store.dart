@@ -196,6 +196,13 @@ class OperationsStore extends ChangeNotifier {
           !(body['members'] as List).every((e) => e is String))
         return false;
       if (teams[id] != null && teams[id]!['owner'] != sender) return false;
+      if ((body['name'] as String).trim().isEmpty ||
+          (body['name'] as String).length > 80 ||
+          (body['members'] as List).length > 100)
+        return false;
+      final color = body['color'];
+      if (color != null && (color is! int || color < 0 || color > 0xffffffff))
+        return false;
       teams[id] = {...body, 'owner': sender};
     } else if (op == 'mission') {
       final team = teams[body['teamId']];

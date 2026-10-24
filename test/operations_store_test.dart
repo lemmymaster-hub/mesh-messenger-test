@@ -17,11 +17,6 @@ class TestTransport extends NearbyService {
     lastCommand = data;
     return null;
   }
-
-  @override
-  void dispose() {
-    super.dispose();
-  }
 }
 
 MeshMessage event(

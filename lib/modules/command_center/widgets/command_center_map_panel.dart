@@ -44,6 +44,7 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
   final _search = TextEditingController();
   String? _root;
   bool _ready = false;
+  bool _satellite = false;
   bool _users = true, _sos = true, _resources = true, _terrain = false;
   @override
   void initState() {
@@ -262,12 +263,14 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
             ),
             children: [
               TileLayer(
-                urlTemplate: _terrain
+                urlTemplate: _satellite
+                    ? 'https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+                    : _terrain
                     ? 'https://tile.opentopomap.org/{z}/{x}/{y}.png'
                     : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 maxNativeZoom: _terrain ? 17 : 19,
                 userAgentPackageName: 'ba.noria.nrnmesh',
-                tileProvider: _terrain || _root == null
+                tileProvider: _satellite || _terrain || _root == null
                     ? NetworkTileProvider()
                     : CommandCenterOfflineTileProvider(_root!),
               ),
@@ -275,7 +278,9 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
               RichAttributionWidget(
                 attributions: [
                   TextSourceAttribution(
-                    _terrain
+                    _satellite
+                        ? 'Source: Esri, Vantor, Earthstar Geographics, GIS User Community'
+                        : _terrain
                         ? '© OpenStreetMap • SRTM • OpenTopoMap (CC-BY-SA)'
                         : '© OpenStreetMap contributors',
                   ),
@@ -353,7 +358,14 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
                       if (value == 'users') _users = !_users;
                       if (value == 'sos') _sos = !_sos;
                       if (value == 'resources') _resources = !_resources;
-                      if (value == 'terrain') _terrain = !_terrain;
+                      if (value == 'terrain') {
+                        _terrain = !_terrain;
+                        _satellite = false;
+                      }
+                      if (value == 'satellite') {
+                        _satellite = !_satellite;
+                        _terrain = false;
+                      }
                     }),
                     itemBuilder: (_) => [
                       CheckedPopupMenuItem(
@@ -370,6 +382,11 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
                         value: 'resources',
                         checked: _resources,
                         child: const Text('Resursi • ručni unos'),
+                      ),
+                      CheckedPopupMenuItem(
+                        value: 'satellite',
+                        checked: _satellite,
+                        child: const Text('Satelitska mapa • internet'),
                       ),
                       CheckedPopupMenuItem(
                         value: 'terrain',

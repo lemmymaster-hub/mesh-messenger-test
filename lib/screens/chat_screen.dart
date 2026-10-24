@@ -193,6 +193,7 @@ class _ChatScreenState extends State<ChatScreen>
       if (!mounted) return;
       setState(() {
         _logs.insert(0, log);
+        if (_logs.length > 500) _logs.removeRange(500, _logs.length);
       });
     };
 
@@ -608,7 +609,10 @@ class _ChatScreenState extends State<ChatScreen>
       } else {
         try {
           position = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high,
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              timeLimit: Duration(seconds: 15),
+            ),
           ).timeout(const Duration(seconds: 12));
         } catch (_) {
           try {
@@ -848,7 +852,10 @@ class _ChatScreenState extends State<ChatScreen>
       }
 
       final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
+        ),
       );
 
       await _loadBatteryLevel();

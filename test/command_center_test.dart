@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,7 +12,29 @@ import 'package:mesh_messenger_test/modules/command_center/services/operations_s
 import 'operations_store_test.dart' show TestTransport;
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
+  final binding = TestWidgetsFlutterBinding.ensureInitialized();
+  final cache = Directory.systemTemp.createTempSync('nrn-widget-test-');
+  setUpAll(() async {
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      const MethodChannel('plugins.flutter.io/path_provider'),
+      (_) async => cache.path,
+    );
+    final fontFile = File('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf');
+    if (fontFile.existsSync()) {
+      final loader = FontLoader('ReviewSans')
+        ..addFont(
+          Future.value(ByteData.sublistView(fontFile.readAsBytesSync())),
+        );
+      await loader.load();
+    }
+  });
+  tearDownAll(() {
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      const MethodChannel('plugins.flutter.io/path_provider'),
+      null,
+    );
+    cache.deleteSync(recursive: true);
+  });
   for (final size in [const Size(390, 844), const Size(1600, 1000)]) {
     testWidgets(
       'command center is usable at $size and team creation is functional',
@@ -25,7 +48,11 @@ void main() {
         final screenshotKey = GlobalKey();
         await tester.pumpWidget(
           MaterialApp(
-            theme: ThemeData.dark(),
+            theme: ThemeData.dark().copyWith(
+              textTheme: ThemeData.dark().textTheme.apply(
+                fontFamily: 'ReviewSans',
+              ),
+            ),
             home: RepaintBoundary(
               key: screenshotKey,
               child: CommandCenterScreen(

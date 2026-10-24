@@ -88,6 +88,17 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
     });
   }
 
+  Future<T?> _safeDialog<T>({
+    required BuildContext context,
+    required WidgetBuilder builder,
+  }) async {
+    final route = DialogRoute<T>(context: context, builder: builder);
+    final result = await Navigator.of(context).push(route);
+    // Text controllers must outlive the reverse route transition.
+    await route.completed;
+    return result;
+  }
+
   String _name(String id) =>
       widget.meshUserLocations[id]?['deviceName']?.toString() ??
       mesh.knownDevices[id] ??
@@ -303,7 +314,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
 
   void _userDetails(String id) {
     final data = widget.meshUserLocations[id] ?? {};
-    showDialog<void>(
+    _safeDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(_name(id)),
@@ -400,7 +411,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
   }
 
   void _incident(String id, Map<String, dynamic> incident) {
-    showDialog<void>(
+    _safeDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text('SOS • ${incident['sender'] ?? id}'),
@@ -483,7 +494,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
                     '${(t['members'] as List).length} članova',
                     style: const TextStyle(fontSize: 10),
                   ),
-                  onTap: () => showDialog<void>(
+                  onTap: () => _safeDialog<void>(
                     context: context,
                     builder: (context) => AlertDialog(
                       title: Text('${t['name']}'),
@@ -526,7 +537,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
     final selected = <String>{};
     final users = {...mesh.knownDevices, mesh.deviceId: mesh.deviceName}
       ..removeWhere((id, name) => id.isEmpty || name.isEmpty);
-    final result = await showDialog<bool>(
+    final result = await _safeDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
@@ -666,7 +677,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
     String teamId = '${owned.first['id']}';
     String? sosId;
     final task = TextEditingController();
-    final result = await showDialog<bool>(
+    final result = await _safeDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
@@ -748,7 +759,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
 
   void _mission(Map<String, dynamic> m) {
     final progress = m['progress'] as Map? ?? {};
-    showDialog<void>(
+    _safeDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Praćenje misije'),
@@ -979,7 +990,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
             itemBuilder: (context, index) {
               final photo = ops.photos.reversed.toList()[index];
               return InkWell(
-                onTap: () => showDialog<void>(
+                onTap: () => _safeDialog<void>(
                   context: context,
                   builder: (context) => AlertDialog(
                     title: Text('${photo['sender']} • ${_time(photo['time'])}'),
@@ -1148,7 +1159,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
         lat = TextEditingController(),
         lng = TextEditingController();
     String type = 'Repetitor', status = 'Nepoznato';
-    final ok = await showDialog<bool>(
+    final ok = await _safeDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Evidentiraj resurs'),
@@ -1248,6 +1259,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
         ),
         const SizedBox(height: 20),
         DropdownButtonFormField<String>(
+          key: ValueKey(ops.readiness),
           initialValue: ops.readiness,
           decoration: const InputDecoration(
             labelText: 'Nivo pripravnosti • ovaj komandni centar',
