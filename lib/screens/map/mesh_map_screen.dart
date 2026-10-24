@@ -999,7 +999,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
                 MarkerLayer(markers: [
                   ..._myLocationMarkers(), ..._meshUserMarkers(), ..._sosMarkers(),
                 ]),
-                const RichAttributionWidget(attributions: [
+                RichAttributionWidget(attributions: [
                   TextSourceAttribution('OpenStreetMap contributors'),
                 ]),
               ],
