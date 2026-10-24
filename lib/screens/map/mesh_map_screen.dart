@@ -692,7 +692,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
       'name': areaName,
       'lat': downloadCenter.latitude,
       'lng': downloadCenter.longitude,
-      'zoom': _safeZoom(_currentZoom),
+      'zoom': currentZoom,
       'tileCache': true,
       'complete': result.isComplete,
       'downloadedTiles': result.downloaded,
@@ -1008,7 +1008,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
               spacing: 5, runSpacing: 4, children: [
                 _statusBadge(label: 'Čvorovi: $_meshNodeCount', icon: Icons.people, color: _bslCyan),
                 _statusBadge(label: 'SOS: $_activeSosCount', icon: Icons.sos, color: _bslRed),
-                _statusBadge(label: _offlineReady ? 'Offline područje spremno' : 'Preuzmi mapu za offline',
+                _statusBadge(label: _offlineReady ? 'Sačuvana offline područja' : 'Preuzmi mapu za offline',
                   icon: Icons.offline_pin_outlined, color: _offlineReady ? _bslGreen : _bslTextMuted),
               ],
             )),
