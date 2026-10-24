@@ -1926,8 +1926,15 @@ class _ChatScreenState extends State<ChatScreen>
     super.dispose();
   }
 
-  void _openCommandCenter() {
-    Navigator.push(
+  Future<void> _openCommandCenter() async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    if (!mounted) return;
+    try {
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => CommandCenterScreen(
@@ -2027,6 +2034,12 @@ class _ChatScreenState extends State<ChatScreen>
         ),
       ),
     );
+    } finally {
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+      ]);
+    }
   }
 
   void _phoneDevices() => showModalBottomSheet<void>(
@@ -2306,28 +2319,22 @@ class _ChatScreenState extends State<ChatScreen>
               if (!phone) _networkStatusBar(),
               if (phone && !keyboard)
                 Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 4,
-                  ),
-                  child: Row(
-                    children: [
-                      TextButton.icon(
-                        onPressed: sosActive ? _cancelSos : _activateSos,
-                        icon: const Icon(Icons.sos, color: Colors.redAccent),
-                        label: Text(
-                          sosActive ? 'Završi SOS' : 'SOS',
-                          style: const TextStyle(color: Colors.redAccent),
-                        ),
-                      ),
-                      const Spacer(),
-                      TextButton.icon(
-                        onPressed: _phoneDevices,
-                        icon: const Icon(Icons.people_outline),
-                        label: Text('Uređaji ($connectedCount)'),
-                      ),
-                    ],
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Row(children: [
+                    _sosButton(),
+                    const SizedBox(width: 18),
+                    Expanded(child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(sosActive ? 'SOS JE AKTIVAN' : 'HITNI SOS POZIV',
+                          style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                        const Text('Pritisni crveno dugme za slanje poziva mesh uređajima.', style: TextStyle(fontSize: 12)),
+                        TextButton.icon(onPressed: _phoneDevices,
+                          icon: const Icon(Icons.people_outline),
+                          label: Text('Uređaji ($connectedCount)')),
+                      ],
+                    )),
+                  ]),
                 ),
               if (!phone)
                 Padding(

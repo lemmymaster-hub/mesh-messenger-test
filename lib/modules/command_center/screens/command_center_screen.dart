@@ -2079,7 +2079,38 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
     _ => _settings(),
   };
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: bg,
+    resizeToAvoidBottomInset: false,
+    body: SafeArea(
+      child: LayoutBuilder(builder: (context, viewport) {
+        // Keep the entire operational overview visible on landscape phones.
+        const canvas = Size(1600, 900);
+        return Center(
+          child: FittedBox(
+            key: const ValueKey('command-center-overview'),
+            fit: BoxFit.contain,
+            child: SizedBox(
+              width: canvas.width,
+              height: canvas.height,
+              child: MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  size: canvas,
+                  padding: EdgeInsets.zero,
+                  viewPadding: EdgeInsets.zero,
+                  viewInsets: EdgeInsets.zero,
+                  textScaler: TextScaler.noScaling,
+                ),
+                child: _buildConsole(context),
+              ),
+            ),
+          ),
+        );
+      }),
+    ),
+  );
+
+  Widget _buildConsole(BuildContext context) => AnimatedBuilder(
     animation: _changes,
     builder: (context, _) => LayoutBuilder(
       builder: (context, constraints) {
@@ -2105,6 +2136,11 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
               style: const TextStyle(fontSize: 14, letterSpacing: 1),
             ),
             actions: [
+              TextButton.icon(
+                onPressed: widget.onOfflineMaps,
+                icon: const Icon(Icons.download_for_offline_outlined),
+                label: const Text('OFFLINE MAPE'),
+              ),
               TextButton.icon(
                 onPressed: widget.onSos,
                 icon: const Icon(Icons.sos, color: Colors.redAccent),

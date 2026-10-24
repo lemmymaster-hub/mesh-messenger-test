@@ -101,13 +101,6 @@ void main() {
           await file.writeAsBytes(data!.buffer.asUint8List());
           image.dispose();
         });
-        if (size.width < 700) {
-          await tester.tap(find.text('Više').last);
-          await tester.pumpAndSettle();
-        } else if (size.width < 1200) {
-          await tester.tap(find.byTooltip('Open navigation menu'));
-          await tester.pumpAndSettle();
-        }
         await tester.tap(find.text('Timovi').first);
         await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('Formiraj tim'));
@@ -215,8 +208,8 @@ void main() {
         ),
       );
       await tester.pump(const Duration(milliseconds: 500));
-      expect(find.byKey(const ValueKey('phone-navigation')), findsOneWidget);
-      expect(find.text('FOTO ZID'), findsNothing);
+      expect(find.byKey(const ValueKey('command-center-overview')), findsOneWidget);
+      expect(find.text('Foto zid'), findsWidgets);
       expect(tester.takeException(), isNull);
       Future<void> capture(String tab) async {
         await tester.runAsync(() async {
@@ -234,41 +227,14 @@ void main() {
         });
       }
 
-      await capture('map');
-      await tester.tap(find.byTooltip('Opcije mape'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Prikaži sve oznake'));
-      await tester.pumpAndSettle();
-      for (final tab in ['SOS', 'Zadaci', 'Poruke', 'Više']) {
-        final destination = find.descendant(
-          of: find.byKey(const ValueKey('phone-navigation')),
-          matching: find.text(tab),
-        );
-        await tester.tap(destination);
+      await capture('overview');
+      for (final tab in ['Situacijska mapa', 'SOS centar', 'Dispatch centar', 'Komunikacije', 'Postavke', 'Dashboard']) {
+        await tester.tap(find.text(tab).first);
         await tester.pumpAndSettle();
-        expect(tester.takeException(), isNull, reason: 'Layout $tab at $size');
-        await capture(tab);
+        expect(tester.takeException(), isNull, reason: 'Console $tab at $size');
       }
-      await tester.tap(
-        find.descendant(
-          of: find.byKey(const ValueKey('phone-navigation')),
-          matching: find.text('Poruke'),
-        ),
-      );
-      await tester.pumpAndSettle();
-      final input = find.byType(TextField);
-      expect(input, findsOneWidget);
-      await tester.tap(input);
-      await tester.enterText(input, 'Terenski izvještaj');
-      tester.view.viewInsets = FakeViewPadding(
-        bottom: (size.height < 500 ? 160 : 260) * tester.view.devicePixelRatio,
-      );
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('phone-navigation')), findsNothing);
-      expect(tester.takeException(), isNull, reason: 'Keyboard at $size');
-      await capture('keyboard');
-      tester.view.resetViewInsets();
-      await tester.pumpAndSettle();
+      expect(find.byTooltip('Nazad u chat'), findsOneWidget);
+      expect(find.text('OFFLINE MAPE'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       ops.dispose();
       live.dispose();

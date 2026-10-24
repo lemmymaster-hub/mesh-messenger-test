@@ -618,8 +618,9 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
       builder: (dialogContext) {
         return AlertDialog(
           backgroundColor: const Color(0xFF151A23),
+          scrollable: true,
           title: const Text(
-            'Naziv offline mape',
+            'Preuzmi područje mape',
             style: TextStyle(color: Colors.white),
           ),
           content: TextFormField(
@@ -648,7 +649,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
 
                 Navigator.of(dialogContext).pop(name);
               },
-              child: const Text('Sačuvaj'),
+              child: const Text('Preuzmi'),
             ),
           ],
         );
@@ -928,6 +929,20 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
       backgroundColor: _bslBg,
       body: Column(
         children: [
+          SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: FilledButton.icon(
+                key: const ValueKey('download-offline-area'),
+                onPressed: _isDownloadingMap ? null : _downloadCurrentArea,
+                icon: const Icon(Icons.download_for_offline),
+                label: Text(_isDownloadingMap
+                    ? 'Preuzimanje $_offlineDownloadCurrent/$_offlineDownloadTotal'
+                    : 'PREUZMI PODRUČJE ZA OFFLINE'),
+              ),
+            ),
+          ),
           Container(
             padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
             color: _bslPanel,
@@ -948,7 +963,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
                       ),
                       const SizedBox(width: 4),
                       const Text(
-                        'BSL Mesh',
+                        'NRN Mape',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 18,
