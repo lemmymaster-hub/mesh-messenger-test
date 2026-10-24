@@ -1932,7 +1932,7 @@ class _ChatScreenState extends State<ChatScreen>
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);
-    if (!mounted) return;
+    if (!mounted) { return; }
     try {
     await Navigator.push(
       context,
@@ -1968,6 +1968,12 @@ class _ChatScreenState extends State<ChatScreen>
         ),
       ),
     );
+    } finally {
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+      ]);
+    }
   }
 
   Future<void> _editPhoneProfile() async {
@@ -2034,12 +2040,6 @@ class _ChatScreenState extends State<ChatScreen>
         ),
       ),
     );
-    } finally {
-      await SystemChrome.setPreferredOrientations([
-        DeviceOrientation.portraitUp,
-        DeviceOrientation.portraitDown,
-      ]);
-    }
   }
 
   void _phoneDevices() => showModalBottomSheet<void>(
