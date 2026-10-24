@@ -47,7 +47,7 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
   final _search = TextEditingController();
   String? _root;
   bool _ready = false;
-  bool _satellite = false;
+  bool _satellite = true;
   bool _users = true, _sos = true, _resources = true, _terrain = false;
   @override
   void initState() {
@@ -399,6 +399,16 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
                       : _terrain
                       ? 'https://tile.opentopomap.org/{z}/{x}/{y}.png'
                       : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  errorTileCallback: (tile, error, stackTrace) {
+                    // Prefer the reference imagery, but retain offline basemap access.
+                    if (_satellite) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted && _satellite) {
+                          setState(() => _satellite = false);
+                        }
+                      });
+                    }
+                  },
                   maxNativeZoom: _terrain ? 17 : 19,
                   userAgentPackageName: 'ba.noria.nrnmesh',
                   tileProvider: _satellite || _terrain || _root == null
