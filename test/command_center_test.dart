@@ -44,6 +44,13 @@ void main() {
       (tester) async {
         SharedPreferences.setMockInitialValues({});
         await tester.binding.setSurfaceSize(size);
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = size;
+        addTearDown(() {
+          tester.view.resetViewInsets();
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
         final transport = TestTransport();
         final ops = OperationsStore(transport);
         await ops.ready;
@@ -132,6 +139,13 @@ void main() {
       final size = spec.$1;
       SharedPreferences.setMockInitialValues({});
       await tester.binding.setSurfaceSize(size);
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = size;
+      addTearDown(() {
+        tester.view.resetViewInsets();
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
       final transport = TestTransport()..knownDevices['a'] = 'Vatrogasac 1';
       final ops = OperationsStore(transport);
       await ops.ready;

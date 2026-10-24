@@ -49,8 +49,9 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
   bool _busy = false;
   String? _recipient;
   bool _onlyMyTasks = false;
+  Size? _layoutSize;
   bool get _isPhone {
-    final size = MediaQuery.sizeOf(context);
+    final size = _layoutSize ?? MediaQuery.sizeOf(context);
     return size.width < 700 || (size.width < 1100 && size.height < 500);
   }
 
@@ -1797,7 +1798,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
 
   Widget _phoneShell() {
     final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
-    final short = MediaQuery.sizeOf(context).height < 500;
+    final short = (_layoutSize ?? MediaQuery.sizeOf(context)).height < 500;
     final title = switch (_page) {
       0 || 1 => 'Situacijska mapa',
       2 => 'SOS centar',
@@ -2082,6 +2083,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
     animation: _changes,
     builder: (context, _) => LayoutBuilder(
       builder: (context, constraints) {
+        _layoutSize = constraints.biggest;
         if (_isPhone) {
           return _phoneShell();
         }
