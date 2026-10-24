@@ -16,7 +16,7 @@
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <application
-        android:label="BSL Mesh Lite"
+        android:label="NRN Mesh"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 

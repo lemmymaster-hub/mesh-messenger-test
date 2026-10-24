@@ -1,13 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
+
 import 'dart:async';
+
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../models/chat_message.dart';
+import '../modules/command_center/services/operations_store.dart';
 import '../services/nearby_service.dart';
+
 import 'package:audioplayers/audioplayers.dart';
+
 import 'map/mesh_map_screen.dart';
+
 import 'package:battery_plus/battery_plus.dart';
+
 import '../modules/command_center/screens/command_center_screen.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -24,6 +32,13 @@ class _ChatScreenState extends State<ChatScreen>
   final ScrollController _scrollController = ScrollController();
 
   late final NearbyService nearbyService;
+  late final OperationsStore _operations;
+  final ValueNotifier<int> _meshLive = ValueNotifier(0);
+  void _changed() {
+    _operations.syncIncidents(meshSosLocations);
+    _meshLive.value++;
+  }
+
   final Battery _battery = Battery();
   late final AnimationController _sosPulseController;
   late final Animation<double> _sosPulseAnimation;
@@ -65,7 +80,7 @@ class _ChatScreenState extends State<ChatScreen>
   final Set<String> _sosRejectedBy = {};
   bool _locationBroadcastInProgress = false;
 
-  int _batteryLevel = 0;
+  int _batteryLevel = -1;
   int sosSentCount = 0;
   int sosAcceptedCount = 0;
   int sosPendingCount = 0;
@@ -108,8 +123,9 @@ class _ChatScreenState extends State<ChatScreen>
                   'Diskonektuj se od: $name',
                   style: const TextStyle(color: Colors.white),
                 ),
-                onTap: () {
+                onTap: () async {
                   Navigator.pop(context);
+                  await nearbyService.disconnect(endpointId);
                 },
               ),
             ],
@@ -132,13 +148,29 @@ class _ChatScreenState extends State<ChatScreen>
       CurvedAnimation(parent: _sosPulseController, curve: Curves.easeInOut),
     );
     nearbyService = NearbyService();
+    _operations = OperationsStore(nearbyService);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final savedName = await nearbyService.loadDeviceName();
       await nearbyService.loadOrCreateDeviceId();
       await _loadSelectedRole();
+      await _operations.ready;
+      if (!mounted) {
+        return;
+      }
+      for (final e in _operations.incidents.entries) {
+        if (e.value['status'] != 'resolved') {
+          meshSosLocations[e.key] = Map.of(e.value);
+          if (e.value['senderId'] == nearbyService.deviceId) {
+            activeSosId = e.key;
+            sosActive = true;
+          }
+        }
+      }
       internetAvailable = await nearbyService.hasInternetConnection();
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       if (savedName == null) {
         _addSystemMessage('Klikni ✏️ gore desno i unesi ime uređaja.');
@@ -162,9 +194,14 @@ class _ChatScreenState extends State<ChatScreen>
     });
 
     nearbyService.onLog = (log) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       setState(() {
         _logs.insert(0, log);
+        if (_logs.length > 500) {
+          _logs.removeRange(500, _logs.length);
+        }
       });
     };
 
@@ -178,17 +215,26 @@ class _ChatScreenState extends State<ChatScreen>
           timestamp,
           batteryLevel,
         ) {
-          if (!mounted) return;
+          if (!mounted) {
+            return;
+          }
 
+          if (((meshUserLocations[deviceId]?['time'] as num?)?.toInt() ?? 0) >
+              timestamp) {
+            return;
+          }
           setState(() {
-            meshUserLocations[deviceName] = {
+            meshUserLocations[deviceId] = {
+              'deviceId': deviceId,
+              'deviceName': deviceName,
               'role': deviceRole,
               'lat': latitude,
               'lng': longitude,
               'time': timestamp,
-              'battery': batteryLevel ?? 0,
+              'battery': batteryLevel ?? -1,
             };
 
+            _changed();
             _logs.insert(
               0,
               '📍 Lokacija primljena od $deviceName | $latitude, $longitude',
@@ -197,7 +243,9 @@ class _ChatScreenState extends State<ChatScreen>
         };
 
     nearbyService.onMessageReceived = (meshMessage, endpointId) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       final message = meshMessage.text;
       final type = meshMessage.type;
@@ -211,15 +259,17 @@ class _ChatScreenState extends State<ChatScreen>
       var shouldStopSosAlarm = false;
 
       setState(() {
+        if (type == 'command') {
+          return;
+        }
         if (type == 'sos') {
           final sosId = meshMessage.sosId ?? meshMessage.messageId;
           var latitude = meshMessage.latitude;
           var longitude = meshMessage.longitude;
 
           if (latitude == null || longitude == null) {
-            final latMatch = RegExp(
-              r'Lokacija: ([\d\.-]+), ([\d\.-]+)',
-            ).firstMatch(message);
+            final latMatch = RegExp(r'Lokacija: ([\d\.-]+), ([\d\.-]+)')
+                .firstMatch(message);
 
             latitude = double.tryParse(latMatch?.group(1) ?? '');
             longitude = double.tryParse(latMatch?.group(2) ?? '');
@@ -233,7 +283,7 @@ class _ChatScreenState extends State<ChatScreen>
           incomingSosId = sosId;
           shouldStartSosAlarm = true;
 
-          if (latitude != null && longitude != null) {
+          {
             meshSosLocations[sosId] = {
               'lat': latitude,
               'lng': longitude,
@@ -276,6 +326,11 @@ class _ChatScreenState extends State<ChatScreen>
             );
           }
         } else if (type == 'sos_cancel') {
+          final cancelId = meshMessage.sosId;
+          if (cancelId != null &&
+              meshSosLocations[cancelId]?['senderId'] == meshMessage.senderId) {
+            meshSosLocations.remove(cancelId);
+          }
           final matchesIncomingIncident =
               incomingSosId != null &&
               meshMessage.sosId == incomingSosId &&
@@ -351,13 +406,17 @@ class _ChatScreenState extends State<ChatScreen>
         _stopIncomingSosAlarm();
       }
 
+      _changed();
       _scrollToBottom();
     };
 
     nearbyService.onDevicesChanged = () {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       _syncLocationBroadcastWithConnections();
+      _changed();
       setState(() {});
     };
   }
@@ -377,10 +436,13 @@ class _ChatScreenState extends State<ChatScreen>
     try {
       final level = await _battery.batteryLevel;
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       setState(() {
         _batteryLevel = level;
+        _meshLive.value++;
       });
     } catch (_) {}
   }
@@ -425,7 +487,9 @@ class _ChatScreenState extends State<ChatScreen>
 
     await _playIncomingSosAlarmCycle(isRepeat: false);
 
-    if (!mounted || !incomingSosActive) return;
+    if (!mounted || !incomingSosActive) {
+      return;
+    }
 
     sosAlarmRepeatTimer = Timer.periodic(const Duration(minutes: 3), (timer) {
       if (!mounted || !incomingSosActive) {
@@ -438,7 +502,9 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _playIncomingSosAlarmCycle({required bool isRepeat}) async {
-    if (!mounted || !incomingSosActive) return;
+    if (!mounted || !incomingSosActive) {
+      return;
+    }
 
     sosAlarmStopTimer?.cancel();
 
@@ -448,10 +514,14 @@ class _ChatScreenState extends State<ChatScreen>
 
     _sosPulseController.repeat(reverse: true);
     await _sosAudioPlayer.stop();
-    if (!mounted || !incomingSosActive) return;
+    if (!mounted || !incomingSosActive) {
+      return;
+    }
 
     await _sosAudioPlayer.setReleaseMode(ReleaseMode.loop);
-    if (!mounted || !incomingSosActive) return;
+    if (!mounted || !incomingSosActive) {
+      return;
+    }
 
     await _sosAudioPlayer.play(AssetSource('sounds/sos_siren.mp3'));
     if (!mounted || !incomingSosActive) {
@@ -468,7 +538,9 @@ class _ChatScreenState extends State<ChatScreen>
 
     sosAlarmStopTimer = Timer(const Duration(seconds: 30), () async {
       await _sosAudioPlayer.stop();
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       setState(() {
         sosAlarmActive = false;
@@ -485,7 +557,9 @@ class _ChatScreenState extends State<ChatScreen>
     sosAlarmRepeatTimer = null;
     sosAlarmStopTimer = null;
 
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     setState(() {
       sosAlarmActive = false;
@@ -524,12 +598,16 @@ class _ChatScreenState extends State<ChatScreen>
 
   Future<void> _saveDeviceName() async {
     final name = _nameController.text.trim();
-    if (name.isEmpty) return;
+    if (name.isEmpty) {
+      return;
+    }
 
     await nearbyService.setDeviceName(name);
     await _saveSelectedRole(selectedRole);
 
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     setState(() {
       showNameEditor = false;
@@ -562,12 +640,14 @@ class _ChatScreenState extends State<ChatScreen>
 
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
-        locationWarning =
-            'GPS nije dostupan. SOS će biti poslat bez lokacije.';
+        locationWarning = 'GPS nije dostupan. SOS će biti poslat bez lokacije.';
       } else {
         try {
           position = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high,
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              timeLimit: Duration(seconds: 15),
+            ),
           ).timeout(const Duration(seconds: 12));
         } catch (_) {
           try {
@@ -594,7 +674,9 @@ class _ChatScreenState extends State<ChatScreen>
         longitude: sosPosition?.longitude,
       );
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       if (sendResult == null) {
         setState(() {
@@ -620,10 +702,10 @@ class _ChatScreenState extends State<ChatScreen>
         activeSosId = sendResult.messageId;
         _sosAcceptedBy.clear();
         _sosRejectedBy.clear();
-        if (sosPosition != null) {
+        {
           meshSosLocations[sendResult.messageId] = {
-            'lat': sosPosition.latitude,
-            'lng': sosPosition.longitude,
+            'lat': sosPosition?.latitude,
+            'lng': sosPosition?.longitude,
             'time': DateTime.now().millisecondsSinceEpoch,
             'message': 'Lokalno aktiviran SOS',
             'sender': nearbyService.deviceName,
@@ -632,15 +714,14 @@ class _ChatScreenState extends State<ChatScreen>
             'status': 'active',
           };
         }
+        _changed();
         final locationDescription = sosPosition == null
             ? 'Lokacija nije dostupna'
             : 'Lokacija: ${sosPosition.latitude}, ${sosPosition.longitude}';
         _setPinnedSosCard(
           status: 'active',
           title: '🆘 AKTIVAN SOS',
-          message:
-              'SOS POSLAT\n'
-              locationDescription,
+          message: 'SOS POSLAT\n$locationDescription',
           sender: nearbyService.deviceName,
         );
         _messages.insert(
@@ -665,12 +746,16 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _cancelSos() async {
-    if (activeSosId == null) return;
+    if (activeSosId == null) {
+      return;
+    }
 
     final sosId = activeSosId!;
     final sendResult = await nearbyService.sendSosCancel(sosId: sosId);
 
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     if (sendResult == null) {
       setState(() {
@@ -693,6 +778,8 @@ class _ChatScreenState extends State<ChatScreen>
       }
       activeSosId = null;
       meshSosLocations.remove(sosId);
+      unawaited(_operations.resolveLocal(sosId));
+      _changed();
       _sosAcceptedBy.clear();
       _sosRejectedBy.clear();
 
@@ -706,44 +793,73 @@ class _ChatScreenState extends State<ChatScreen>
     });
   }
 
+  bool _sendingChat = false;
   Future<void> _sendMessage() async {
+    if (_sendingChat) {
+      return;
+    }
     final text = _controller.text.trim();
-    if (text.isEmpty) return;
-
-    final isPrivateMode = selectedPrivateDeviceName != null;
-
-    setState(() {
-      if (isPrivateMode) {
-        _privateMessages.add(
-          ChatMessage(
-            text: text,
-            isMe: true,
-            time: DateTime.now(),
-            senderName: 'Ja',
+    if (text.isEmpty) {
+      return;
+    }
+    final privateMode = selectedPrivateDeviceName != null;
+    final receiverId = selectedPrivateDeviceId;
+    if (privateMode && receiverId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Identitet primaoca još nije poznat. Sačekaj HELLO razmjenu.',
           ),
-        );
-      } else {
-        _messages.add(
-          ChatMessage(
-            text: text,
-            isMe: true,
-            time: DateTime.now(),
-            senderName: 'Ja',
-          ),
-        );
-      }
-    });
-
-    _controller.clear();
-    _scrollToBottom();
-
-    if (isPrivateMode && selectedPrivateDeviceId != null) {
-      await nearbyService.sendPrivateMessage(
-        text: text,
-        receiverDeviceId: selectedPrivateDeviceId!,
+        ),
       );
-    } else {
-      await nearbyService.sendMessage(text);
+      return;
+    }
+    _sendingChat = true;
+    try {
+      final result = privateMode
+          ? await nearbyService.sendPrivateMessage(
+              text: text,
+              receiverDeviceId: receiverId!,
+            )
+          : await nearbyService.sendMessage(text);
+      if (!mounted) {
+        return;
+      }
+      if (result == null || !result.delivered) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Poruka nije poslata. Provjeri mesh veze.'),
+          ),
+        );
+        return;
+      }
+      setState(() {
+        (privateMode ? _privateMessages : _messages).add(
+          ChatMessage(
+            text: text,
+            isMe: true,
+            time: DateTime.now(),
+            senderName: 'Ja',
+          ),
+        );
+        _logs.insert(
+          0,
+          'Poruka predata direktnim vezama: ${result.deliveredCount}/${result.attemptedCount}; prijem nije potvrđen.',
+        );
+      });
+      await _operations.recordOutgoing(text, privateMode ? receiverId : null);
+      if (!mounted) {
+        return;
+      }
+      _controller.clear();
+      _scrollToBottom();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Poruka nije poslata: $e')));
+      }
+    } finally {
+      _sendingChat = false;
     }
   }
 
@@ -758,7 +874,9 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _startLocationBroadcast() {
-    if (locationBroadcastTimer?.isActive ?? false) return;
+    if (locationBroadcastTimer?.isActive ?? false) {
+      return;
+    }
 
     unawaited(_broadcastMyLocation());
 
@@ -789,7 +907,10 @@ class _ChatScreenState extends State<ChatScreen>
       }
 
       final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
+        ),
       );
 
       await _loadBatteryLevel();
@@ -800,10 +921,12 @@ class _ChatScreenState extends State<ChatScreen>
         batteryLevel: _batteryLevel,
       );
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       setState(() {
-        meshUserLocations[nearbyService.deviceName] = {
+        meshUserLocations[nearbyService.deviceId] = {
           'deviceId': nearbyService.deviceId,
           'deviceName': nearbyService.deviceName,
           'role': selectedRole,
@@ -813,9 +936,12 @@ class _ChatScreenState extends State<ChatScreen>
           'battery': _batteryLevel,
           'isLocal': true,
         };
+        _changed();
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       setState(() {
         _logs.insert(0, 'Greška slanja lokacije: $e');
@@ -827,8 +953,12 @@ class _ChatScreenState extends State<ChatScreen>
 
   void _scrollToBottom() {
     Future.delayed(const Duration(milliseconds: 100), () {
-      if (!mounted) return;
-      if (!_scrollController.hasClients) return;
+      if (!mounted) {
+        return;
+      }
+      if (!_scrollController.hasClients) {
+        return;
+      }
 
       _scrollController.animateTo(
         _scrollController.position.maxScrollExtent,
@@ -938,7 +1068,9 @@ class _ChatScreenState extends State<ChatScreen>
     String reason = '',
   }) async {
     final sosId = incomingSosId;
-    if (sosId == null) return false;
+    if (sosId == null) {
+      return false;
+    }
 
     final result = await nearbyService.sendSosResponse(
       sosId: sosId,
@@ -946,18 +1078,23 @@ class _ChatScreenState extends State<ChatScreen>
       reason: reason,
     );
 
-    if (!mounted) return false;
+    if (!mounted) {
+      return false;
+    }
 
     if (result == null) {
       setState(() {
         _addSystemMessage(
-          'SOS odgovor NIJE ISPORUČEN. Reaguj ponovo kada se mesh veza uspostavi.',
+          'SOS odgovor NIJE POSLAT. Reaguj ponovo kada se mesh veza uspostavi.',
         );
       });
       return false;
     }
 
-    if (incomingSosId != sosId) return false;
+    await _operations.recordSosResponse(sosId, responseType);
+    if (!mounted || incomingSosId != sosId) {
+      return false;
+    }
 
     _stopIncomingSosAlarm();
 
@@ -982,7 +1119,9 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _showRejectSosDialog() async {
-    if (incomingSosId == null) return;
+    if (incomingSosId == null) {
+      return;
+    }
 
     String selectedReason = 'Nisam u mogućnosti da pomognem';
     String customReason = '';
@@ -999,65 +1138,55 @@ class _ChatScreenState extends State<ChatScreen>
                 style: TextStyle(color: Colors.white),
               ),
               content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    RadioListTile<String>(
-                      value: 'Nisam u mogućnosti da pomognem',
-                      groupValue: selectedReason,
-                      activeColor: Colors.redAccent,
-                      title: const Text(
-                        'Nisam u mogućnosti da pomognem',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                      onChanged: (value) {
-                        setDialogState(() {
-                          selectedReason = value!;
-                        });
-                      },
-                    ),
-                    RadioListTile<String>(
-                      value: 'Mislim da je lažni SOS',
-                      groupValue: selectedReason,
-                      activeColor: Colors.redAccent,
-                      title: const Text(
-                        'Mislim da je lažni SOS',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                      onChanged: (value) {
-                        setDialogState(() {
-                          selectedReason = value!;
-                        });
-                      },
-                    ),
-                    RadioListTile<String>(
-                      value: 'Drugi razlog',
-                      groupValue: selectedReason,
-                      activeColor: Colors.redAccent,
-                      title: const Text(
-                        'Drugi razlog',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                      onChanged: (value) {
-                        setDialogState(() {
-                          selectedReason = value!;
-                        });
-                      },
-                    ),
-                    if (selectedReason == 'Drugi razlog')
-                      TextField(
-                        style: const TextStyle(color: Colors.white),
-                        decoration: InputDecoration(
-                          hintText: 'Unesi razlog...',
-                          hintStyle: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.5),
-                          ),
+                child: RadioGroup<String>(
+                  groupValue: selectedReason,
+                  onChanged: (value) {
+                    if (value != null) {
+                      setDialogState(() => selectedReason = value);
+                    }
+                  },
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      RadioListTile<String>(
+                        value: 'Nisam u mogućnosti da pomognem',
+                        activeColor: Colors.redAccent,
+                        title: const Text(
+                          'Nisam u mogućnosti da pomognem',
+                          style: TextStyle(color: Colors.white),
                         ),
-                        onChanged: (value) {
-                          customReason = value.trim();
-                        },
                       ),
-                  ],
+                      RadioListTile<String>(
+                        value: 'Mislim da je lažni SOS',
+                        activeColor: Colors.redAccent,
+                        title: const Text(
+                          'Mislim da je lažni SOS',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ),
+                      RadioListTile<String>(
+                        value: 'Drugi razlog',
+                        activeColor: Colors.redAccent,
+                        title: const Text(
+                          'Drugi razlog',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ),
+                      if (selectedReason == 'Drugi razlog')
+                        TextField(
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            hintText: 'Unesi razlog...',
+                            hintStyle: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.5),
+                            ),
+                          ),
+                          onChanged: (value) {
+                            customReason = value.trim();
+                          },
+                        ),
+                    ],
+                  ),
                 ),
               ),
               actions: [
@@ -1077,7 +1206,9 @@ class _ChatScreenState extends State<ChatScreen>
                         ? customReason
                         : selectedReason;
 
-                    if (reason.isEmpty) return;
+                    if (reason.isEmpty) {
+                      return;
+                    }
 
                     Navigator.of(dialogContext).pop(reason);
                   },
@@ -1090,12 +1221,11 @@ class _ChatScreenState extends State<ChatScreen>
       },
     );
 
-    if (result == null || result.isEmpty) return;
+    if (result == null || result.isEmpty) {
+      return;
+    }
 
-    await _respondToIncomingSos(
-      responseType: 'sos_reject',
-      reason: result,
-    );
+    await _respondToIncomingSos(responseType: 'sos_reject', reason: result);
   }
 
   Widget _pinnedSosCard() {
@@ -1290,9 +1420,7 @@ class _ChatScreenState extends State<ChatScreen>
                         padding: EdgeInsets.zero,
                       ),
                       onPressed: () async {
-                        await _respondToIncomingSos(
-                          responseType: 'sos_accept',
-                        );
+                        await _respondToIncomingSos(responseType: 'sos_accept');
                       },
                       child: const Text(
                         'PRIHVATI',
@@ -1346,7 +1474,7 @@ class _ChatScreenState extends State<ChatScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Direktno isporučen na $sosSentCount uređaja',
+            'Predato na $sosSentCount direktnih veza',
             style: const TextStyle(
               color: Colors.redAccent,
               fontSize: 12,
@@ -1428,7 +1556,7 @@ class _ChatScreenState extends State<ChatScreen>
               borderRadius: BorderRadius.circular(10),
             ),
             child: Text(
-              internetAvailable ? '🌐 ONLINE' : '📡 MESH',
+              internetAvailable ? '🌐 LAN/MOBILE' : '📡 MESH',
               style: TextStyle(
                 color: internetAvailable
                     ? Colors.lightBlueAccent
@@ -1444,34 +1572,21 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _compactDeviceStatusPanel() {
-    final seenNames = <String>{};
-
     final directDevices = nearbyService.connectedDevices.entries.toList();
 
-    final foundDevices = nearbyService.foundDevices.entries.where((entry) {
-      final isConnectedById = nearbyService.connectedDevices.containsKey(
-        entry.key,
-      );
-      final isConnectedByName = nearbyService.connectedDevices.values.contains(
-        entry.value,
-      );
-      final isDuplicateName = seenNames.contains(entry.value);
-
-      if (!isConnectedById && !isConnectedByName && !isDuplicateName) {
-        seenNames.add(entry.value);
-        return true;
-      }
-
-      return false;
-    }).toList();
-
-    final indirectDevices = nearbyService.knownDevices.entries.where((entry) {
-      final isMe = entry.key == nearbyService.deviceId;
-      final isDirect = nearbyService.connectedDevices.values.contains(
-        entry.value,
-      );
-      return !isMe && !isDirect;
-    }).toList();
+    final foundDevices = nearbyService.foundDevices.entries
+        .where(
+          (entry) => !nearbyService.connectedDevices.containsKey(entry.key),
+        )
+        .toList();
+    final directIds = nearbyService.endpointDeviceIds.values.toSet();
+    final indirectDevices = nearbyService.knownDevices.entries
+        .where(
+          (entry) =>
+              entry.key != nearbyService.deviceId &&
+              !directIds.contains(entry.key),
+        )
+        .toList();
 
     final hasAnyDevice =
         directDevices.isNotEmpty ||
@@ -1661,13 +1776,17 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
-  Widget _privateChatPanel() {
+  Widget _privateChatPanel({bool fill = false}) {
     if (selectedPrivateDeviceName == null) {
       return const SizedBox.shrink();
     }
 
     return Container(
-      height: MediaQuery.of(context).viewInsets.bottom > 0 ? 120 : 220,
+      height: fill
+          ? null
+          : MediaQuery.of(context).viewInsets.bottom > 0
+          ? 120
+          : 220,
       width: double.infinity,
       color: const Color(0xFF0B1220),
       child: Column(
@@ -1739,51 +1858,54 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _inputBar() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 12),
-      color: const Color(0xFF151A23),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _controller,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: incomingSosActive
-                    ? 'Prvo reaguj na SOS poruku...'
-                    : selectedPrivateDeviceName == null
-                    ? 'Unesi mesh poruku...'
-                    : 'Privatna poruka za $selectedPrivateDeviceName...',
-                hintStyle: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.5),
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 12),
+        color: const Color(0xFF151A23),
+        child: Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _controller,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: incomingSosActive
+                      ? 'Prvo reaguj na SOS poruku...'
+                      : selectedPrivateDeviceName == null
+                      ? 'Unesi mesh poruku...'
+                      : 'Privatna poruka za $selectedPrivateDeviceName...',
+                  hintStyle: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.5),
+                  ),
+                  filled: true,
+                  fillColor: const Color(0xFF0E1117),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(25),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 12,
+                  ),
                 ),
-                filled: true,
-                fillColor: const Color(0xFF0E1117),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(25),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 12,
-                ),
+                onSubmitted: (_) {
+                  if (!incomingSosActive) {
+                    _sendMessage();
+                  }
+                },
               ),
-              onSubmitted: (_) {
-                if (!incomingSosActive) {
-                  _sendMessage();
-                }
-              },
             ),
-          ),
-          const SizedBox(width: 8),
-          CircleAvatar(
-            backgroundColor: const Color(0xFF2563EB),
-            child: IconButton(
-              icon: const Icon(Icons.send, color: Colors.white),
-              onPressed: incomingSosActive ? null : _sendMessage,
+            const SizedBox(width: 8),
+            CircleAvatar(
+              backgroundColor: const Color(0xFF2563EB),
+              child: IconButton(
+                icon: const Icon(Icons.send, color: Colors.white),
+                onPressed: incomingSosActive ? null : _sendMessage,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1798,12 +1920,241 @@ class _ChatScreenState extends State<ChatScreen>
     _scrollController.dispose();
     _sosPulseController.dispose();
     unawaited(_sosAudioPlayer.dispose());
+    _operations.dispose();
+    _meshLive.dispose();
     nearbyService.dispose();
     super.dispose();
   }
 
+  Future<void> _openCommandCenter() async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    if (!mounted) { return; }
+    try {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CommandCenterScreen(
+          meshUserLocations: meshUserLocations,
+          meshSosLocations: meshSosLocations,
+          batteryLevel: () => _batteryLevel,
+          transport: nearbyService,
+          operations: _operations,
+          live: _meshLive,
+          onSosResponded: (id) {
+            if (incomingSosId == id) {
+              _stopIncomingSosAlarm();
+              setState(() {
+                incomingSosActive = false;
+                showSosModal = false;
+              });
+            }
+          },
+          onSos: _activateSos,
+          onCancelSos: _cancelSos,
+          onOfflineMaps: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => MeshMapScreen(
+                meshUserLocations: meshUserLocations,
+                meshSosLocations: meshSosLocations,
+                live: _meshLive,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    } finally {
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+      ]);
+    }
+  }
+
+  Future<void> _editPhoneProfile() async {
+    _nameController.text = nearbyService.deviceName;
+    var role = selectedRole;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, update) => Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            0,
+            20,
+            MediaQuery.viewInsetsOf(sheetContext).bottom + 20,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Profil uređaja',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _nameController,
+                  maxLength: 60,
+                  decoration: const InputDecoration(labelText: 'Ime uređaja'),
+                ),
+                DropdownButtonFormField<String>(
+                  initialValue: role,
+                  decoration: const InputDecoration(labelText: 'Uloga'),
+                  items: [
+                    for (final value in availableRoles)
+                      DropdownMenuItem(value: value, child: Text(value)),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      update(() => role = value);
+                    }
+                  },
+                ),
+                const SizedBox(height: 20),
+                FilledButton(
+                  onPressed: () async {
+                    if (_nameController.text.trim().isEmpty) {
+                      return;
+                    }
+                    setState(() => selectedRole = role);
+                    await _saveDeviceName();
+                    if (sheetContext.mounted) {
+                      Navigator.pop(sheetContext);
+                    }
+                  },
+                  child: const Text('Sačuvaj profil'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _phoneDevices() => showModalBottomSheet<void>(
+    context: context,
+    useSafeArea: true,
+    showDragHandle: true,
+    builder: (context) => ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        const ListTile(
+          title: Text(
+            'Uređaji',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+          ),
+        ),
+        for (final entry in nearbyService.connectedDevices.entries)
+          ListTile(
+            leading: const Icon(Icons.link, color: Colors.greenAccent),
+            title: Text(entry.value),
+            subtitle: const Text('Direktna veza'),
+            onTap: () {
+              Navigator.pop(context);
+              _showConnectedDeviceOptions(entry.key, entry.value);
+            },
+          ),
+        for (final entry in nearbyService.foundDevices.entries)
+          ListTile(
+            leading: const Icon(Icons.bluetooth_searching),
+            title: Text(entry.value),
+            trailing: TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                nearbyService.connectToDevice(entry.key);
+              },
+              child: const Text('Poveži'),
+            ),
+          ),
+        if (nearbyService.connectedDevices.isEmpty &&
+            nearbyService.foundDevices.isEmpty)
+          const ListTile(
+            title: Text('Nema otkrivenih uređaja'),
+            subtitle: Text('Pokreni povezivanje kroz meni gore desno.'),
+          ),
+      ],
+    ),
+  );
+
+  Widget _phoneChatMenu() => PopupMenuButton<String>(
+    tooltip: 'Opcije chata',
+    onSelected: (value) async {
+      if (value == 'profile') {
+        await _editPhoneProfile();
+      }
+      if (value == 'connect') {
+        await nearbyService.startAdvertising();
+        await nearbyService.startDiscovery();
+      }
+      if (value == 'map' && mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => MeshMapScreen(
+              meshUserLocations: meshUserLocations,
+              meshSosLocations: meshSosLocations,
+              live: _meshLive,
+            ),
+          ),
+        );
+      }
+      if (value == 'logs' && mounted) {
+        showModalBottomSheet<void>(
+          context: context,
+          useSafeArea: true,
+          showDragHandle: true,
+          builder: (_) => ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              const Text(
+                'Dijagnostika mreže',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+              ),
+              for (final log in _logs.take(100))
+                ListTile(
+                  title: Text(log, style: const TextStyle(fontSize: 13)),
+                ),
+            ],
+          ),
+        );
+      }
+      if (value == 'sos') {
+        if (sosActive) {
+          await _cancelSos();
+        } else {
+          await _activateSos();
+        }
+      }
+    },
+    itemBuilder: (_) => [
+      const PopupMenuItem(value: 'profile', child: Text('Profil uređaja')),
+      const PopupMenuItem(value: 'connect', child: Text('Pokreni povezivanje')),
+      const PopupMenuItem(value: 'map', child: Text('Offline mapa')),
+      PopupMenuItem(
+        value: 'sos',
+        child: Text(sosActive ? 'Završi moj SOS' : 'Pošalji SOS'),
+      ),
+      const PopupMenuItem(value: 'logs', child: Text('Dijagnostika mreže')),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) {
+    final screen = MediaQuery.sizeOf(context);
+    final phone =
+        screen.width < 700 || (screen.width < 1100 && screen.height < 500);
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
     final connectedCount = nearbyService.connectedDevices.length;
     final deviceName = nearbyService.deviceName.isEmpty
         ? 'Nije podešeno'
@@ -1818,11 +2169,15 @@ class _ChatScreenState extends State<ChatScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'BSL Mesh Chat',
+              'NRN Mesh Chat',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(color: Colors.white, fontSize: 18),
             ),
             Text(
               '$deviceName • $selectedRole | Povezano: $connectedCount',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.65),
                 fontSize: 11,
@@ -1831,64 +2186,72 @@ class _ChatScreenState extends State<ChatScreen>
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: 'Promijeni ime',
-            onPressed: () {
-              setState(() {
-                _nameController.text = nearbyService.deviceName;
-                showNameEditor = !showNameEditor;
-              });
-            },
-            icon: const Icon(Icons.edit, color: Colors.white),
-          ),
-          IconButton(
-            tooltip: 'Auto connect',
-            onPressed: () async {
-              await nearbyService.startAdvertising();
-              await Future.delayed(const Duration(seconds: 1));
-              await nearbyService.startDiscovery();
-            },
-            icon: const Icon(Icons.hub, color: Colors.white),
-          ),
+          if (phone) ...[
+            IconButton(
+              tooltip: 'Komandni centar',
+              onPressed: _openCommandCenter,
+              icon: const Icon(
+                Icons.dashboard_outlined,
+                color: Colors.lightBlueAccent,
+              ),
+            ),
+            _phoneChatMenu(),
+          ] else ...[
+            IconButton(
+              tooltip: 'Promijeni ime',
+              onPressed: () {
+                setState(() {
+                  _nameController.text = nearbyService.deviceName;
+                  showNameEditor = !showNameEditor;
+                });
+              },
+              icon: const Icon(Icons.edit, color: Colors.white),
+            ),
+            IconButton(
+              tooltip: 'Auto connect',
+              onPressed: () async {
+                await nearbyService.startAdvertising();
+                await Future.delayed(const Duration(seconds: 1));
+                await nearbyService.startDiscovery();
+              },
+              icon: const Icon(Icons.hub, color: Colors.white),
+            ),
 
-          IconButton(
-            tooltip: 'Mapa',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => MeshMapScreen(
-                    meshUserLocations: meshUserLocations,
-                    meshSosLocations: meshSosLocations,
+            IconButton(
+              tooltip: 'Mapa',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => MeshMapScreen(
+                      meshUserLocations: meshUserLocations,
+                      meshSosLocations: meshSosLocations,
+                      live: _meshLive,
+                    ),
                   ),
-                ),
-              );
-            },
-            icon: const Icon(Icons.map, color: Colors.white),
-          ),
-          IconButton(
-            tooltip: 'Command Center',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => CommandCenterScreen(
-                    meshUserLocations: meshUserLocations,
-                    meshSosLocations: meshSosLocations,
-                    batteryLevel: _batteryLevel,
-                  ),
-                ),
-              );
-            },
-            icon: const Icon(Icons.dashboard, color: Colors.lightBlueAccent),
-          ),
+                );
+              },
+              icon: const Icon(Icons.map, color: Colors.white),
+            ),
+            IconButton(
+              tooltip: 'Command Center',
+              onPressed: _openCommandCenter,
+              icon: const Icon(Icons.dashboard, color: Colors.lightBlueAccent),
+            ),
+          ],
         ],
       ),
       body: Stack(
         children: [
           Column(
             children: [
-              if (showNameEditor)
+              if (phone && showNameEditor)
+                TextButton.icon(
+                  onPressed: _editPhoneProfile,
+                  icon: const Icon(Icons.person_outline),
+                  label: const Text('Postavi profil uređaja'),
+                ),
+              if (showNameEditor && !phone)
                 Container(
                   padding: const EdgeInsets.all(12),
                   color: const Color(0xFF151A23),
@@ -1933,7 +2296,9 @@ class _ChatScreenState extends State<ChatScreen>
                           );
                         }).toList(),
                         onChanged: (value) {
-                          if (value == null) return;
+                          if (value == null) {
+                            return;
+                          }
 
                           setState(() {
                             selectedRole = value;
@@ -1951,26 +2316,49 @@ class _ChatScreenState extends State<ChatScreen>
                     ],
                   ),
                 ),
-              _networkStatusBar(),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
+              if (!phone) _networkStatusBar(),
+              if (phone && !keyboard)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Row(children: [
                     _sosButton(),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: sosActive
-                          ? _sosStatusPanel()
-                          : _compactDeviceStatusPanel(),
-                    ),
-                  ],
+                    const SizedBox(width: 18),
+                    Expanded(child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(sosActive ? 'SOS JE AKTIVAN' : 'HITNI SOS POZIV',
+                          style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                        const Text('Pritisni crveno dugme za slanje poziva mesh uređajima.', style: TextStyle(fontSize: 12)),
+                        TextButton.icon(onPressed: _phoneDevices,
+                          icon: const Icon(Icons.people_outline),
+                          label: Text('Uređaji ($connectedCount)')),
+                      ],
+                    )),
+                  ]),
                 ),
-              ),
+              if (!phone)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      _sosButton(),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: sosActive
+                            ? _sosStatusPanel()
+                            : _compactDeviceStatusPanel(),
+                      ),
+                    ],
+                  ),
+                ),
 
-              _chatArea(),
+              if (phone && selectedPrivateDeviceName != null)
+                Expanded(child: _privateChatPanel(fill: true))
+              else
+                _chatArea(),
 
-              if (_logs.isNotEmpty)
+              if (_logs.isNotEmpty && !phone)
                 ExpansionTile(
                   collapsedBackgroundColor: const Color(0xFF151A23),
                   backgroundColor: const Color(0xFF151A23),
@@ -1992,7 +2380,7 @@ class _ChatScreenState extends State<ChatScreen>
                   }).toList(),
                 ),
 
-              _privateChatPanel(),
+              if (!phone) _privateChatPanel(),
               _inputBar(),
             ],
           ),

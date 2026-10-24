@@ -11,10 +11,7 @@ void main() {
 
       expect(cache.markIfNew('message-1', now: now), isTrue);
       expect(
-        cache.markIfNew(
-          'message-1',
-          now: now.add(const Duration(minutes: 1)),
-        ),
+        cache.markIfNew('message-1', now: now.add(const Duration(minutes: 1))),
         isFalse,
       );
     });
@@ -27,10 +24,7 @@ void main() {
 
       expect(cache.markIfNew('message-1', now: now), isTrue);
       expect(
-        cache.markIfNew(
-          'message-1',
-          now: now.add(const Duration(minutes: 6)),
-        ),
+        cache.markIfNew('message-1', now: now.add(const Duration(minutes: 6))),
         isTrue,
       );
     });
