@@ -4,7 +4,7 @@ Flutter Android application for local Nearby Connections messaging, relayed GPS/
 
 ## Command center
 
-Open the dashboard button in the chat toolbar. On large screens the layout follows the supplied reference: navigation, status cards, map, SOS center, photo wall, teams, dispatch, mission progress, communications and actual direct-link topology. Phones use a drawer and stacked panels.
+Open the dashboard button in the chat toolbar. On large screens the layout follows the supplied reference: navigation, status cards, map, SOS center, photo wall, teams, dispatch, mission progress, communications and actual direct-link topology. Phones use a dedicated full-screen map, readable SOS/task cards and persistent bottom navigation for Map, SOS, Tasks, Messages and More. Secondary tools are grouped under More; keyboard-aware messaging hides navigation while typing. Short landscape screens use the same compact shell.
 
 - GPS uses persistent device IDs, with names as labels. Old positions are grey after two minutes.
 - Map controls include zoom, fit all, GPS centering, local user/coordinate search, filters, topography and an optional online Esri imagery layer. OSM uses previously downloaded local tiles when available. Satellite/topographic layers require internet; no 3D or live imagery is claimed.

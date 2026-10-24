@@ -48,6 +48,22 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
   int _page = 0, _sosTab = 0;
   bool _busy = false;
   String? _recipient;
+  bool _onlyMyTasks = false;
+  bool get _isPhone {
+    final size = MediaQuery.sizeOf(context);
+    return size.width < 700 || (size.width < 1100 && size.height < 500);
+  }
+
+  int get _activeSosCount =>
+      ops.incidents.values.where((e) => e['status'] != 'resolved').length;
+  bool get _phoneMapSelected => _page == 0 || _page == 1;
+  int get _phoneNavIndex => switch (_page) {
+    0 || 1 => 0,
+    2 => 1,
+    3 => 2,
+    6 => 3,
+    _ => 4,
+  };
   OperationsStore get ops => widget.operations;
   NearbyService get mesh => widget.transport;
   static const labels = [
@@ -144,45 +160,54 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
       child: Text(
         text,
         textAlign: TextAlign.center,
-        style: const TextStyle(color: Colors.white54, fontSize: 12),
+        style: TextStyle(color: Colors.white54, fontSize: _isPhone ? 15 : 12),
       ),
     ),
   );
-  Widget _box(String title, Widget child, {Widget? action}) => Material(
+  Widget _box(
+    String title,
+    Widget child, {
+    Widget? action,
+    bool showHeader = true,
+  }) => Material(
     color: panel,
     shape: RoundedRectangleBorder(
       side: const BorderSide(color: line),
-      borderRadius: BorderRadius.circular(7),
+      borderRadius: BorderRadius.circular(_isPhone ? 16 : 7),
     ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 9, 8, 7),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title.toUpperCase(),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: .6,
+        if (showHeader)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 9, 8, 7),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _isPhone ? title : title.toUpperCase(),
+                    style: TextStyle(
+                      fontSize: _isPhone ? 16 : 12,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: .6,
+                    ),
                   ),
                 ),
-              ),
-              ?action,
-            ],
+                ?action,
+              ],
+            ),
           ),
-        ),
-        const Divider(height: 1, color: line),
+        if (showHeader) const Divider(height: 1, color: line),
         Expanded(child: child),
       ],
     ),
   );
   Widget _all(int page) => TextButton(
     onPressed: () => setState(() => _page = page),
-    child: const Text('PRIKAŽI SVE', style: TextStyle(fontSize: 9)),
+    child: Text(
+      _isPhone ? 'Otvori' : 'PRIKAŽI SVE',
+      style: TextStyle(fontSize: _isPhone ? 14 : 9),
+    ),
   );
   Widget _stat(String title, String value, IconData icon, Color color) =>
       Container(
@@ -309,6 +334,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
     ],
   );
   Widget _map() => CommandCenterMapPanel(
+    compact: _isPhone,
     meshUserLocations: widget.meshUserLocations,
     meshSosLocations: Map.fromEntries(
       ops.incidents.entries.where((e) => e.value['status'] != 'resolved'),
@@ -328,6 +354,10 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
     _safeDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
+        insetPadding: _isPhone
+            ? const EdgeInsets.symmetric(horizontal: 16, vertical: 20)
+            : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
         title: Text(_name(id)),
         content: Text(
           '${data['role'] ?? mesh.knownDeviceRoles[id] ?? 'Korisnik'}\nGPS: ${data['lat'] ?? '—'}, ${data['lng'] ?? '—'}\nBaterija: ${data['battery'] ?? '—'}%\nPozicija primljena: ${_time(data['time'])}\nID: $id',
@@ -425,6 +455,10 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
     _safeDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
+        insetPadding: _isPhone
+            ? const EdgeInsets.symmetric(horizontal: 16, vertical: 20)
+            : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
         title: Text('SOS • ${incident['sender'] ?? id}'),
         content: SingleChildScrollView(
           child: Text(
@@ -489,22 +523,32 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
             children: [
               for (final t in ops.teams.values)
                 ListTile(
-                  dense: true,
+                  dense: !_isPhone,
                   leading: Icon(
                     Icons.groups,
                     color: Color((t['color'] as num?)?.toInt() ?? 0xFF1687FF),
                   ),
                   title: Text(
                     '${t['name']}',
-                    style: const TextStyle(fontSize: 12),
+                    style: TextStyle(fontSize: _isPhone ? 16 : 12),
                   ),
                   subtitle: Text(
                     '${(t['members'] as List).length} članova',
-                    style: const TextStyle(fontSize: 10),
+                    style: TextStyle(fontSize: _isPhone ? 13 : 10),
                   ),
                   onTap: () => _safeDialog<void>(
                     context: context,
                     builder: (context) => AlertDialog(
+                      scrollable: true,
+                      insetPadding: _isPhone
+                          ? const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 20,
+                            )
+                          : const EdgeInsets.symmetric(
+                              horizontal: 40,
+                              vertical: 24,
+                            ),
                       title: Text('${t['name']}'),
                       content: Text(
                         (t['members'] as List)
@@ -538,6 +582,28 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
       icon: const Icon(Icons.group_add, size: 18),
     ),
   );
+  Widget _teamMemberOption(
+    MapEntry<String, String> entry,
+    Set<String> selected,
+    StateSetter update,
+  ) => CheckboxListTile(
+    title: Text(entry.value),
+    subtitle: Text(
+      entry.key == mesh.deviceId
+          ? 'Ovaj uređaj'
+          : 'Poznat uređaj • veza nije garantovana',
+      style: TextStyle(fontSize: _isPhone ? 13 : 10),
+    ),
+    value: selected.contains(entry.key),
+    onChanged: (value) => update(() {
+      if (value == true) {
+        selected.add(entry.key);
+      } else {
+        selected.remove(entry.key);
+      }
+    }),
+  );
+
   Future<void> _createTeam() async {
     await ops.ready;
     if (!mounted) {
@@ -551,44 +617,42 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
+          scrollable: true,
+          insetPadding: _isPhone
+              ? const EdgeInsets.symmetric(horizontal: 16, vertical: 20)
+              : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
           title: const Text('Formiraj tim'),
           content: SizedBox(
             width: 380,
-            height: 360,
+            height: _isPhone ? null : 360,
             child: Column(
+              mainAxisSize: _isPhone ? MainAxisSize.min : MainAxisSize.max,
               children: [
                 TextField(
                   controller: name,
                   onChanged: (_) => update(() {}),
                   maxLength: 60,
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) =>
+                      FocusManager.instance.primaryFocus?.unfocus(),
                   decoration: const InputDecoration(labelText: 'Naziv tima'),
                 ),
-                Expanded(
-                  child: users.isEmpty
-                      ? _empty('Prvo postavi ime uređaja i poveži učesnike')
-                      : ListView(
-                          children: [
-                            for (final e in users.entries)
-                              CheckboxListTile(
-                                title: Text(e.value),
-                                subtitle: Text(
-                                  e.key == mesh.deviceId
-                                      ? 'Ovaj uređaj'
-                                      : 'Poznat uređaj • veza nije garantovana',
-                                  style: const TextStyle(fontSize: 10),
-                                ),
-                                value: selected.contains(e.key),
-                                onChanged: (value) => update(() {
-                                  if (value == true) {
-                                    selected.add(e.key);
-                                  } else {
-                                    selected.remove(e.key);
-                                  }
-                                }),
-                              ),
-                          ],
-                        ),
-                ),
+                if (_isPhone) ...[
+                  if (users.isEmpty)
+                    _empty('Prvo postavi ime uređaja i poveži učesnike'),
+                  for (final entry in users.entries)
+                    _teamMemberOption(entry, selected, update),
+                ] else
+                  Expanded(
+                    child: users.isEmpty
+                        ? _empty('Prvo postavi ime uređaja i poveži učesnike')
+                        : ListView(
+                            children: [
+                              for (final entry in users.entries)
+                                _teamMemberOption(entry, selected, update),
+                            ],
+                          ),
+                  ),
               ],
             ),
           ),
@@ -692,6 +756,10 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
+          scrollable: true,
+          insetPadding: _isPhone
+              ? const EdgeInsets.symmetric(horizontal: 16, vertical: 20)
+              : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
           title: const Text('Dodijeli zadatak'),
           content: SizedBox(
             width: 380,
@@ -776,6 +844,10 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
     _safeDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
+        insetPadding: _isPhone
+            ? const EdgeInsets.symmetric(horizontal: 16, vertical: 20)
+            : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
         title: const Text('Praćenje misije'),
         content: SizedBox(
           width: 420,
@@ -898,7 +970,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
                     child: Text(
                       'Privatno • ${e.value}',
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 11),
+                      style: TextStyle(fontSize: _isPhone ? 14 : 11),
                     ),
                   ),
               ],
@@ -913,14 +985,17 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
                     children: [
                       for (final m in messages.reversed)
                         ListTile(
-                          dense: true,
+                          dense: !_isPhone,
                           title: Text(
                             '${m['sender']} • ${m['channel'] == 'private' ? 'Privatno' : 'Broadcast'} • ${_time(m['time'])}',
-                            style: const TextStyle(fontSize: 10, color: blue),
+                            style: TextStyle(
+                              fontSize: _isPhone ? 13 : 10,
+                              color: blue,
+                            ),
                           ),
                           subtitle: Text(
                             '${m['text']}',
-                            style: const TextStyle(fontSize: 12),
+                            style: TextStyle(fontSize: _isPhone ? 16 : 12),
                           ),
                         ),
                     ],
@@ -934,6 +1009,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
                   child: TextField(
                     controller: _message,
                     maxLength: 2000,
+                    style: TextStyle(fontSize: _isPhone ? 16 : 14),
                     decoration: const InputDecoration(
                       hintText: 'Napiši poruku…',
                       counterText: '',
@@ -968,6 +1044,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
           ),
         ],
       ),
+      showHeader: !_isPhone,
     );
   }
 
@@ -1018,6 +1095,16 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
                 onTap: () => _safeDialog<void>(
                   context: context,
                   builder: (context) => AlertDialog(
+                    scrollable: true,
+                    insetPadding: _isPhone
+                        ? const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 20,
+                          )
+                        : const EdgeInsets.symmetric(
+                            horizontal: 40,
+                            vertical: 24,
+                          ),
                     title: Text('${photo['sender']} • ${_time(photo['time'])}'),
                     content: Image.memory(
                       base64Decode('${photo['bytes']}'),
@@ -1187,6 +1274,10 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
     final ok = await _safeDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
+        insetPadding: _isPhone
+            ? const EdgeInsets.symmetric(horizontal: 16, vertical: 20)
+            : const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
         title: const Text('Evidentiraj resurs'),
         content: SingleChildScrollView(
           child: Column(
@@ -1337,6 +1428,550 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
       ],
     ),
   );
+  Widget _phoneEmpty(IconData icon, String title, String detail) => Center(
+    child: SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 48, color: Colors.white38),
+          const SizedBox(height: 16),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            detail,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 15,
+              color: Colors.white60,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _phoneStatusButton(
+    String label,
+    String value,
+    IconData icon,
+    Color color,
+    VoidCallback tap,
+  ) => Expanded(
+    child: TextButton(
+      onPressed: tap,
+      style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        minimumSize: const Size(0, 44),
+        foregroundColor: color,
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 17),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              '$label $value',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _phoneIncidents() {
+    final entries = ops.incidents.entries
+        .where(
+          (e) => _sosTab == 0
+              ? e.value['status'] != 'resolved'
+              : e.value['status'] == 'resolved',
+        )
+        .toList();
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+          child: SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<int>(
+              showSelectedIcon: false,
+              segments: [
+                ButtonSegment(
+                  value: 0,
+                  label: Text('Aktivni ($_activeSosCount)'),
+                ),
+                const ButtonSegment(value: 1, label: Text('Završeni')),
+              ],
+              selected: {_sosTab},
+              onSelectionChanged: (values) =>
+                  setState(() => _sosTab = values.first),
+            ),
+          ),
+        ),
+        Expanded(
+          child: entries.isEmpty
+              ? _phoneEmpty(
+                  Icons.health_and_safety_outlined,
+                  'Nema SOS događaja',
+                  'Primljeni pozivi za pomoć prikazat će se ovdje.',
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                  itemCount: entries.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final entry = entries[index];
+                    return Material(
+                      color: panel,
+                      borderRadius: BorderRadius.circular(16),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: () => _incident(entry.key, entry.value),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const CircleAvatar(
+                                backgroundColor: Color(0xFF4B1520),
+                                child: Icon(Icons.sos, color: Colors.redAccent),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '${entry.value['sender'] ?? 'SOS poziv'}',
+                                      style: const TextStyle(
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      '${entry.value['message'] ?? ''}',
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      '${_time(entry.value['time'])} • Dodirni za odgovor',
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.white54,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Icon(
+                                Icons.chevron_right,
+                                color: Colors.white38,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _phoneTasks() {
+    final missions = ops.missions.values
+        .where(
+          (m) =>
+              !_onlyMyTasks || (m['members'] as List).contains(mesh.deviceId),
+        )
+        .toList()
+        .reversed
+        .toList();
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _busy ? null : _assign,
+                  style: FilledButton.styleFrom(minimumSize: const Size(0, 48)),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Novi zadatak'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.filledTonal(
+                tooltip: 'Timovi',
+                onPressed: () => setState(() => _page = 4),
+                icon: const Icon(Icons.groups_outlined),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Wrap(
+              spacing: 8,
+              children: [
+                ChoiceChip(
+                  label: const Text('Svi zadaci'),
+                  selected: !_onlyMyTasks,
+                  onSelected: (_) => setState(() => _onlyMyTasks = false),
+                ),
+                ChoiceChip(
+                  label: const Text('Moji zadaci'),
+                  selected: _onlyMyTasks,
+                  onSelected: (_) => setState(() => _onlyMyTasks = true),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: missions.isEmpty
+              ? _phoneEmpty(
+                  Icons.assignment_outlined,
+                  'Nema zadataka',
+                  'Formiraj tim, dodijeli zadatak i prati potvrde članova.',
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                  itemCount: missions.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final mission = missions[index];
+                    final progress = mission['progress'] as Map? ?? {};
+                    final status =
+                        (progress[mesh.deviceId] as Map?)?['status'] ??
+                        'Čeka potvrdu';
+                    return Material(
+                      color: panel,
+                      borderRadius: BorderRadius.circular(16),
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.all(16),
+                        title: Text(
+                          '${mission['task']}',
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            '${ops.teams[mission['teamId']]?['name'] ?? 'Tim'} • ${progress.length}/${(mission['members'] as List).length} odgovora\n$status',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              color: Colors.white60,
+                              height: 1.5,
+                            ),
+                          ),
+                        ),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => _mission(mission),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _phoneMore() => ListView(
+    padding: const EdgeInsets.all(12),
+    children: [
+      Material(
+        color: panel,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Icon(
+                Icons.hub_outlined,
+                color: mesh.connectedDevices.isEmpty
+                    ? Colors.amber
+                    : Colors.greenAccent,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      mesh.connectedDevices.isEmpty
+                          ? 'Nema direktnih veza'
+                          : '${mesh.connectedDevices.length} direktnih veza',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${ops.teams.length} timova • Pripravnost: ${ops.readiness}',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: Colors.white60,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      const SizedBox(height: 12),
+      for (final (page, detail) in [
+        (4, 'Formiranje i članovi timova'),
+        (5, 'Uređaji i povezivanje'),
+        (7, 'Terenske fotografije'),
+        (8, 'Direktne veze i poznati uređaji'),
+        (9, 'Vozila, dronovi i oprema'),
+        (10, 'Mreža, pripravnost i offline mape'),
+      ])
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Material(
+            color: panel,
+            borderRadius: BorderRadius.circular(14),
+            child: ListTile(
+              minVerticalPadding: 14,
+              leading: Icon(icons[page], color: blue),
+              title: Text(
+                labels[page],
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              subtitle: Text(
+                detail,
+                style: const TextStyle(fontSize: 13, color: Colors.white54),
+              ),
+              trailing: const Icon(Icons.chevron_right, size: 20),
+              onTap: () => setState(() => _page = page),
+            ),
+          ),
+        ),
+    ],
+  );
+
+  Widget _phoneSecondary() => switch (_page) {
+    2 => _phoneIncidents(),
+    3 => _phoneTasks(),
+    4 => _teams(),
+    5 => _users(),
+    6 => _communications(),
+    7 => _photos(),
+    8 => _network(),
+    9 => _resources(),
+    10 => _settings(),
+    _ => _phoneMore(),
+  };
+
+  Widget _phoneShell() {
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final short = MediaQuery.sizeOf(context).height < 500;
+    final title = switch (_page) {
+      0 || 1 => 'Situacijska mapa',
+      2 => 'SOS centar',
+      3 => 'Zadaci',
+      6 => 'Poruke',
+      11 => 'Više opcija',
+      _ => labels[_page],
+    };
+    return PopScope(
+      canPop: _phoneMapSelected,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          setState(() => _page = 1);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: bg,
+        appBar: AppBar(
+          backgroundColor: bg,
+          toolbarHeight: short ? 52 : 64,
+          leading: IconButton(
+            tooltip: 'Nazad u chat',
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.arrow_back),
+          ),
+          titleSpacing: 0,
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'NRN MESH',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: blue,
+                  letterSpacing: 1.3,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            IconButton(
+              tooltip: 'Povezani uređaji',
+              onPressed: () => setState(() => _page = 5),
+              icon: const Icon(Icons.people_outline),
+            ),
+            IconButton(
+              tooltip: 'Aktiviraj SOS',
+              onPressed: widget.onSos,
+              icon: const Icon(Icons.sos, color: Colors.redAccent),
+            ),
+          ],
+        ),
+        bottomNavigationBar: keyboard
+            ? null
+            : NavigationBarTheme(
+                data: NavigationBarThemeData(
+                  labelTextStyle: WidgetStateProperty.all(
+                    const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                child: NavigationBar(
+                  key: const ValueKey('phone-navigation'),
+                  height: 72,
+                  backgroundColor: panel,
+                  indicatorColor: blue.withValues(alpha: .22),
+                  selectedIndex: _phoneNavIndex,
+                  onDestinationSelected: (index) {
+                    FocusManager.instance.primaryFocus?.unfocus();
+                    setState(() => _page = [1, 2, 3, 6, 11][index]);
+                  },
+                  destinations: [
+                    const NavigationDestination(
+                      icon: Icon(Icons.map_outlined),
+                      selectedIcon: Icon(Icons.map, color: blue),
+                      label: 'Mapa',
+                    ),
+                    NavigationDestination(
+                      icon: Badge(
+                        isLabelVisible: _activeSosCount > 0,
+                        label: Text('$_activeSosCount'),
+                        child: const Icon(Icons.sos),
+                      ),
+                      label: 'SOS',
+                    ),
+                    const NavigationDestination(
+                      icon: Icon(Icons.assignment_outlined),
+                      label: 'Zadaci',
+                    ),
+                    const NavigationDestination(
+                      icon: Icon(Icons.forum_outlined),
+                      label: 'Poruke',
+                    ),
+                    const NavigationDestination(
+                      icon: Icon(Icons.grid_view_outlined),
+                      label: 'Više',
+                    ),
+                  ],
+                ),
+              ),
+        body: SafeArea(
+          top: false,
+          child: Column(
+            children: [
+              if (_busy) const LinearProgressIndicator(minHeight: 2),
+              if (ops.storageError != null)
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Text(
+                    ops.storageError!,
+                    style: const TextStyle(color: Colors.orange),
+                  ),
+                ),
+              if (_phoneMapSelected && !short && !keyboard)
+                Material(
+                  color: panel,
+                  child: Row(
+                    children: [
+                      _phoneStatusButton(
+                        'Veze',
+                        '${mesh.connectedDevices.length}',
+                        Icons.wifi_tethering,
+                        Colors.greenAccent,
+                        () => setState(() => _page = 8),
+                      ),
+                      _phoneStatusButton(
+                        'SOS',
+                        '$_activeSosCount',
+                        Icons.sos,
+                        Colors.redAccent,
+                        () => setState(() => _page = 2),
+                      ),
+                      _phoneStatusButton(
+                        '',
+                        widget.batteryLevel() < 0
+                            ? '—'
+                            : '${widget.batteryLevel()}%',
+                        Icons.battery_std,
+                        Colors.white70,
+                        () => setState(() => _page = 10),
+                      ),
+                    ],
+                  ),
+                ),
+              Expanded(
+                child: IndexedStack(
+                  index: _phoneMapSelected ? 0 : 1,
+                  children: [
+                    Padding(padding: const EdgeInsets.all(8), child: _map()),
+                    _phoneMapSelected
+                        ? const SizedBox.shrink()
+                        : Padding(
+                            padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+                            child: _phoneSecondary(),
+                          ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _dashboard(double width) {
     if (width < 950) {
       return ListView(
@@ -1447,6 +2082,9 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
     animation: _changes,
     builder: (context, _) => LayoutBuilder(
       builder: (context, constraints) {
+        if (_isPhone) {
+          return _phoneShell();
+        }
         final wide = constraints.maxWidth >= 1200;
         return Scaffold(
           backgroundColor: bg,

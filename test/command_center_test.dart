@@ -94,7 +94,10 @@ void main() {
           await file.writeAsBytes(data!.buffer.asUint8List());
           image.dispose();
         });
-        if (size.width < 1200) {
+        if (size.width < 700) {
+          await tester.tap(find.text('Više').last);
+          await tester.pumpAndSettle();
+        } else if (size.width < 1200) {
           await tester.tap(find.byTooltip('Open navigation menu'));
           await tester.pumpAndSettle();
         }
@@ -115,5 +118,137 @@ void main() {
         await tester.binding.setSurfaceSize(null);
       },
     );
+  }
+  for (final spec in [
+    (const Size(320, 640), 1.0),
+    (const Size(360, 740), 1.0),
+    (const Size(390, 844), 1.0),
+    (const Size(844, 390), 1.0),
+    (const Size(360, 740), 1.4),
+  ]) {
+    testWidgets('phone navigation and keyboard fit ${spec.$1} scale ${spec.$2}', (
+      tester,
+    ) async {
+      final size = spec.$1;
+      SharedPreferences.setMockInitialValues({});
+      await tester.binding.setSurfaceSize(size);
+      final transport = TestTransport()..knownDevices['a'] = 'Vatrogasac 1';
+      final ops = OperationsStore(transport);
+      await ops.ready;
+      ops.teams['test-team'] = {
+        'id': 'test-team',
+        'name': 'Tim ALFA',
+        'owner': 'commander',
+        'members': ['commander', 'a'],
+      };
+      ops.missions['test-mission'] = {
+        'id': 'test-mission',
+        'teamId': 'test-team',
+        'owner': 'commander',
+        'task':
+            'Provjera pristupa ugroženom području i izvještaj komandnom centru',
+        'members': ['commander', 'a'],
+        'progress': <String, dynamic>{},
+      };
+      ops.syncIncidents({
+        'test-sos': {
+          'senderId': 'a',
+          'sender': 'Vatrogasac 1',
+          'status': 'active',
+          'message':
+              'Potreban dodatni tim na terenu. Provjeriti pristup lokaciji.',
+          'lat': 43.85,
+          'lng': 18.38,
+          'time': DateTime.now().millisecondsSinceEpoch,
+        },
+      });
+      await ops.recordOutgoing('Ekipa je krenula prema lokaciji.', null);
+      final live = ValueNotifier(0);
+      final captureKey = GlobalKey();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(),
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: TextScaler.linear(spec.$2)),
+            child: child!,
+          ),
+          home: RepaintBoundary(
+            key: captureKey,
+            child: CommandCenterScreen(
+              meshUserLocations: const {},
+              meshSosLocations: const {},
+              transport: transport,
+              operations: ops,
+              live: live,
+              batteryLevel: () => 74,
+              onSosResponded: (_) {},
+              onSos: () async {},
+              onCancelSos: () async {},
+              onOfflineMaps: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.byKey(const ValueKey('phone-navigation')), findsOneWidget);
+      expect(find.text('FOTO ZID'), findsNothing);
+      expect(tester.takeException(), isNull);
+      Future<void> capture(String tab) async {
+        await tester.runAsync(() async {
+          final boundary =
+              captureKey.currentContext!.findRenderObject()
+                  as RenderRepaintBoundary;
+          final image = await boundary.toImage();
+          final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+          final file = File(
+            'test-output/phone-${size.width.toInt()}-${size.height.toInt()}-${spec.$2}-$tab.png',
+          );
+          await file.parent.create(recursive: true);
+          await file.writeAsBytes(bytes!.buffer.asUint8List());
+          image.dispose();
+        });
+      }
+
+      await capture('map');
+      await tester.tap(find.byTooltip('Opcije mape'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Prikaži sve oznake'));
+      await tester.pumpAndSettle();
+      for (final tab in ['SOS', 'Zadaci', 'Poruke', 'Više']) {
+        final destination = find.descendant(
+          of: find.byKey(const ValueKey('phone-navigation')),
+          matching: find.text(tab),
+        );
+        await tester.tap(destination);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull, reason: 'Layout $tab at $size');
+        await capture(tab);
+      }
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('phone-navigation')),
+          matching: find.text('Poruke'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final input = find.byType(TextField);
+      expect(input, findsOneWidget);
+      await tester.tap(input);
+      await tester.enterText(input, 'Terenski izvještaj');
+      tester.view.viewInsets = FakeViewPadding(
+        bottom: (size.height < 500 ? 160 : 260) * tester.view.devicePixelRatio,
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('phone-navigation')), findsNothing);
+      expect(tester.takeException(), isNull, reason: 'Keyboard at $size');
+      await capture('keyboard');
+      tester.view.resetViewInsets();
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox());
+      ops.dispose();
+      live.dispose();
+      await tester.binding.setSurfaceSize(null);
+    });
   }
 }

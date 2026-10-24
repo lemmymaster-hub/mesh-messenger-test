@@ -1776,13 +1776,17 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
-  Widget _privateChatPanel() {
+  Widget _privateChatPanel({bool fill = false}) {
     if (selectedPrivateDeviceName == null) {
       return const SizedBox.shrink();
     }
 
     return Container(
-      height: MediaQuery.of(context).viewInsets.bottom > 0 ? 120 : 220,
+      height: fill
+          ? null
+          : MediaQuery.of(context).viewInsets.bottom > 0
+          ? 120
+          : 220,
       width: double.infinity,
       color: const Color(0xFF0B1220),
       child: Column(
@@ -1854,51 +1858,54 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _inputBar() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 12),
-      color: const Color(0xFF151A23),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _controller,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: incomingSosActive
-                    ? 'Prvo reaguj na SOS poruku...'
-                    : selectedPrivateDeviceName == null
-                    ? 'Unesi mesh poruku...'
-                    : 'Privatna poruka za $selectedPrivateDeviceName...',
-                hintStyle: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.5),
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 12),
+        color: const Color(0xFF151A23),
+        child: Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _controller,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: incomingSosActive
+                      ? 'Prvo reaguj na SOS poruku...'
+                      : selectedPrivateDeviceName == null
+                      ? 'Unesi mesh poruku...'
+                      : 'Privatna poruka za $selectedPrivateDeviceName...',
+                  hintStyle: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.5),
+                  ),
+                  filled: true,
+                  fillColor: const Color(0xFF0E1117),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(25),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 12,
+                  ),
                 ),
-                filled: true,
-                fillColor: const Color(0xFF0E1117),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(25),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 12,
-                ),
+                onSubmitted: (_) {
+                  if (!incomingSosActive) {
+                    _sendMessage();
+                  }
+                },
               ),
-              onSubmitted: (_) {
-                if (!incomingSosActive) {
-                  _sendMessage();
-                }
-              },
             ),
-          ),
-          const SizedBox(width: 8),
-          CircleAvatar(
-            backgroundColor: const Color(0xFF2563EB),
-            child: IconButton(
-              icon: const Icon(Icons.send, color: Colors.white),
-              onPressed: incomingSosActive ? null : _sendMessage,
+            const SizedBox(width: 8),
+            CircleAvatar(
+              backgroundColor: const Color(0xFF2563EB),
+              child: IconButton(
+                icon: const Icon(Icons.send, color: Colors.white),
+                onPressed: incomingSosActive ? null : _sendMessage,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1919,8 +1926,222 @@ class _ChatScreenState extends State<ChatScreen>
     super.dispose();
   }
 
+  void _openCommandCenter() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CommandCenterScreen(
+          meshUserLocations: meshUserLocations,
+          meshSosLocations: meshSosLocations,
+          batteryLevel: () => _batteryLevel,
+          transport: nearbyService,
+          operations: _operations,
+          live: _meshLive,
+          onSosResponded: (id) {
+            if (incomingSosId == id) {
+              _stopIncomingSosAlarm();
+              setState(() {
+                incomingSosActive = false;
+                showSosModal = false;
+              });
+            }
+          },
+          onSos: _activateSos,
+          onCancelSos: _cancelSos,
+          onOfflineMaps: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => MeshMapScreen(
+                meshUserLocations: meshUserLocations,
+                meshSosLocations: meshSosLocations,
+                live: _meshLive,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editPhoneProfile() async {
+    _nameController.text = nearbyService.deviceName;
+    var role = selectedRole;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, update) => Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            0,
+            20,
+            MediaQuery.viewInsetsOf(sheetContext).bottom + 20,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Profil uređaja',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _nameController,
+                  maxLength: 60,
+                  decoration: const InputDecoration(labelText: 'Ime uređaja'),
+                ),
+                DropdownButtonFormField<String>(
+                  initialValue: role,
+                  decoration: const InputDecoration(labelText: 'Uloga'),
+                  items: [
+                    for (final value in availableRoles)
+                      DropdownMenuItem(value: value, child: Text(value)),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      update(() => role = value);
+                    }
+                  },
+                ),
+                const SizedBox(height: 20),
+                FilledButton(
+                  onPressed: () async {
+                    if (_nameController.text.trim().isEmpty) {
+                      return;
+                    }
+                    setState(() => selectedRole = role);
+                    await _saveDeviceName();
+                    if (sheetContext.mounted) {
+                      Navigator.pop(sheetContext);
+                    }
+                  },
+                  child: const Text('Sačuvaj profil'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _phoneDevices() => showModalBottomSheet<void>(
+    context: context,
+    useSafeArea: true,
+    showDragHandle: true,
+    builder: (context) => ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        const ListTile(
+          title: Text(
+            'Uređaji',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+          ),
+        ),
+        for (final entry in nearbyService.connectedDevices.entries)
+          ListTile(
+            leading: const Icon(Icons.link, color: Colors.greenAccent),
+            title: Text(entry.value),
+            subtitle: const Text('Direktna veza'),
+            onTap: () {
+              Navigator.pop(context);
+              _showConnectedDeviceOptions(entry.key, entry.value);
+            },
+          ),
+        for (final entry in nearbyService.foundDevices.entries)
+          ListTile(
+            leading: const Icon(Icons.bluetooth_searching),
+            title: Text(entry.value),
+            trailing: TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                nearbyService.connectToDevice(entry.key);
+              },
+              child: const Text('Poveži'),
+            ),
+          ),
+        if (nearbyService.connectedDevices.isEmpty &&
+            nearbyService.foundDevices.isEmpty)
+          const ListTile(
+            title: Text('Nema otkrivenih uređaja'),
+            subtitle: Text('Pokreni povezivanje kroz meni gore desno.'),
+          ),
+      ],
+    ),
+  );
+
+  Widget _phoneChatMenu() => PopupMenuButton<String>(
+    tooltip: 'Opcije chata',
+    onSelected: (value) async {
+      if (value == 'profile') {
+        await _editPhoneProfile();
+      }
+      if (value == 'connect') {
+        await nearbyService.startAdvertising();
+        await nearbyService.startDiscovery();
+      }
+      if (value == 'map' && mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => MeshMapScreen(
+              meshUserLocations: meshUserLocations,
+              meshSosLocations: meshSosLocations,
+              live: _meshLive,
+            ),
+          ),
+        );
+      }
+      if (value == 'logs' && mounted) {
+        showModalBottomSheet<void>(
+          context: context,
+          useSafeArea: true,
+          showDragHandle: true,
+          builder: (_) => ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              const Text(
+                'Dijagnostika mreže',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+              ),
+              for (final log in _logs.take(100))
+                ListTile(
+                  title: Text(log, style: const TextStyle(fontSize: 13)),
+                ),
+            ],
+          ),
+        );
+      }
+      if (value == 'sos') {
+        if (sosActive) {
+          await _cancelSos();
+        } else {
+          await _activateSos();
+        }
+      }
+    },
+    itemBuilder: (_) => [
+      const PopupMenuItem(value: 'profile', child: Text('Profil uređaja')),
+      const PopupMenuItem(value: 'connect', child: Text('Pokreni povezivanje')),
+      const PopupMenuItem(value: 'map', child: Text('Offline mapa')),
+      PopupMenuItem(
+        value: 'sos',
+        child: Text(sosActive ? 'Završi moj SOS' : 'Pošalji SOS'),
+      ),
+      const PopupMenuItem(value: 'logs', child: Text('Dijagnostika mreže')),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) {
+    final screen = MediaQuery.sizeOf(context);
+    final phone =
+        screen.width < 700 || (screen.width < 1100 && screen.height < 500);
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
     final connectedCount = nearbyService.connectedDevices.length;
     final deviceName = nearbyService.deviceName.isEmpty
         ? 'Nije podešeno'
@@ -1936,10 +2157,14 @@ class _ChatScreenState extends State<ChatScreen>
           children: [
             const Text(
               'NRN Mesh Chat',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(color: Colors.white, fontSize: 18),
             ),
             Text(
               '$deviceName • $selectedRole | Povezano: $connectedCount',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.65),
                 fontSize: 11,
@@ -1948,89 +2173,72 @@ class _ChatScreenState extends State<ChatScreen>
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: 'Promijeni ime',
-            onPressed: () {
-              setState(() {
-                _nameController.text = nearbyService.deviceName;
-                showNameEditor = !showNameEditor;
-              });
-            },
-            icon: const Icon(Icons.edit, color: Colors.white),
-          ),
-          IconButton(
-            tooltip: 'Auto connect',
-            onPressed: () async {
-              await nearbyService.startAdvertising();
-              await Future.delayed(const Duration(seconds: 1));
-              await nearbyService.startDiscovery();
-            },
-            icon: const Icon(Icons.hub, color: Colors.white),
-          ),
+          if (phone) ...[
+            IconButton(
+              tooltip: 'Komandni centar',
+              onPressed: _openCommandCenter,
+              icon: const Icon(
+                Icons.dashboard_outlined,
+                color: Colors.lightBlueAccent,
+              ),
+            ),
+            _phoneChatMenu(),
+          ] else ...[
+            IconButton(
+              tooltip: 'Promijeni ime',
+              onPressed: () {
+                setState(() {
+                  _nameController.text = nearbyService.deviceName;
+                  showNameEditor = !showNameEditor;
+                });
+              },
+              icon: const Icon(Icons.edit, color: Colors.white),
+            ),
+            IconButton(
+              tooltip: 'Auto connect',
+              onPressed: () async {
+                await nearbyService.startAdvertising();
+                await Future.delayed(const Duration(seconds: 1));
+                await nearbyService.startDiscovery();
+              },
+              icon: const Icon(Icons.hub, color: Colors.white),
+            ),
 
-          IconButton(
-            tooltip: 'Mapa',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => MeshMapScreen(
-                    meshUserLocations: meshUserLocations,
-                    meshSosLocations: meshSosLocations,
-                    live: _meshLive,
-                  ),
-                ),
-              );
-            },
-            icon: const Icon(Icons.map, color: Colors.white),
-          ),
-          IconButton(
-            tooltip: 'Command Center',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => CommandCenterScreen(
-                    meshUserLocations: meshUserLocations,
-                    meshSosLocations: meshSosLocations,
-                    batteryLevel: () => _batteryLevel,
-                    transport: nearbyService,
-                    operations: _operations,
-                    live: _meshLive,
-                    onSosResponded: (id) {
-                      if (incomingSosId == id) {
-                        _stopIncomingSosAlarm();
-                        setState(() {
-                          incomingSosActive = false;
-                          showSosModal = false;
-                        });
-                      }
-                    },
-                    onSos: _activateSos,
-                    onCancelSos: _cancelSos,
-                    onOfflineMaps: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => MeshMapScreen(
-                          meshUserLocations: meshUserLocations,
-                          meshSosLocations: meshSosLocations,
-                          live: _meshLive,
-                        ),
-                      ),
+            IconButton(
+              tooltip: 'Mapa',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => MeshMapScreen(
+                      meshUserLocations: meshUserLocations,
+                      meshSosLocations: meshSosLocations,
+                      live: _meshLive,
                     ),
                   ),
-                ),
-              );
-            },
-            icon: const Icon(Icons.dashboard, color: Colors.lightBlueAccent),
-          ),
+                );
+              },
+              icon: const Icon(Icons.map, color: Colors.white),
+            ),
+            IconButton(
+              tooltip: 'Command Center',
+              onPressed: _openCommandCenter,
+              icon: const Icon(Icons.dashboard, color: Colors.lightBlueAccent),
+            ),
+          ],
         ],
       ),
       body: Stack(
         children: [
           Column(
             children: [
-              if (showNameEditor)
+              if (phone && showNameEditor)
+                TextButton.icon(
+                  onPressed: _editPhoneProfile,
+                  icon: const Icon(Icons.person_outline),
+                  label: const Text('Postavi profil uređaja'),
+                ),
+              if (showNameEditor && !phone)
                 Container(
                   padding: const EdgeInsets.all(12),
                   color: const Color(0xFF151A23),
@@ -2095,26 +2303,55 @@ class _ChatScreenState extends State<ChatScreen>
                     ],
                   ),
                 ),
-              _networkStatusBar(),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    _sosButton(),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: sosActive
-                          ? _sosStatusPanel()
-                          : _compactDeviceStatusPanel(),
-                    ),
-                  ],
+              if (!phone) _networkStatusBar(),
+              if (phone && !keyboard)
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                  child: Row(
+                    children: [
+                      TextButton.icon(
+                        onPressed: sosActive ? _cancelSos : _activateSos,
+                        icon: const Icon(Icons.sos, color: Colors.redAccent),
+                        label: Text(
+                          sosActive ? 'Završi SOS' : 'SOS',
+                          style: const TextStyle(color: Colors.redAccent),
+                        ),
+                      ),
+                      const Spacer(),
+                      TextButton.icon(
+                        onPressed: _phoneDevices,
+                        icon: const Icon(Icons.people_outline),
+                        label: Text('Uređaji ($connectedCount)'),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+              if (!phone)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      _sosButton(),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: sosActive
+                            ? _sosStatusPanel()
+                            : _compactDeviceStatusPanel(),
+                      ),
+                    ],
+                  ),
+                ),
 
-              _chatArea(),
+              if (phone && selectedPrivateDeviceName != null)
+                Expanded(child: _privateChatPanel(fill: true))
+              else
+                _chatArea(),
 
-              if (_logs.isNotEmpty)
+              if (_logs.isNotEmpty && !phone)
                 ExpansionTile(
                   collapsedBackgroundColor: const Color(0xFF151A23),
                   backgroundColor: const Color(0xFF151A23),
@@ -2136,7 +2373,7 @@ class _ChatScreenState extends State<ChatScreen>
                   }).toList(),
                 ),
 
-              _privateChatPanel(),
+              if (!phone) _privateChatPanel(),
               _inputBar(),
             ],
           ),
