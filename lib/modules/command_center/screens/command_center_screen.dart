@@ -1009,6 +1009,8 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
                 Expanded(
                   child: TextField(
                     controller: _message,
+                    readOnly: MediaQuery.sizeOf(context).shortestSide < 600,
+                    onTap: MediaQuery.sizeOf(context).shortestSide < 600 ? _composeMessage : null,
                     maxLength: 2000,
                     style: TextStyle(fontSize: _isPhone ? 16 : 14),
                     decoration: const InputDecoration(
@@ -1022,22 +1024,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
                 ),
                 IconButton(
                   tooltip: 'Pošalji poruku',
-                  onPressed: _busy
-                      ? null
-                      : () => _run(() async {
-                          final text = _message.text.trim();
-                          if (text.isEmpty) {
-                            return 'Upiši poruku';
-                          }
-                          final result = await ops.communicate(
-                            text,
-                            _recipient,
-                          );
-                          if (!result.startsWith('Nije')) {
-                            _message.clear();
-                          }
-                          return result;
-                        }),
+                  onPressed: _busy ? null : _sendCommunication,
                   icon: const Icon(Icons.send, color: blue),
                 ),
               ],
@@ -1048,6 +1035,33 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
       showHeader: !_isPhone,
     );
   }
+
+  Future<void> _composeMessage() async {
+    await _safeDialog<void>(context: context, builder: (dialogContext) => AlertDialog(
+      scrollable: true,
+      title: Text(_recipient == null ? 'Broadcast poruka' : 'Poruka: ${_name(_recipient!)}'),
+      content: TextField(
+        controller: _message, autofocus: true, maxLength: 2000,
+        minLines: 1, maxLines: 4,
+        decoration: const InputDecoration(hintText: 'Napiši poruku…'),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Nazad')),
+        FilledButton(onPressed: () {
+          Navigator.pop(dialogContext);
+          _sendCommunication();
+        }, child: const Text('Pošalji')),
+      ],
+    ));
+  }
+
+  Future<void> _sendCommunication() => _run(() async {
+    final text = _message.text.trim();
+    if (text.isEmpty) { return 'Upiši poruku'; }
+    final result = await ops.communicate(text, _recipient);
+    if (!result.startsWith('Nije')) { _message.clear(); }
+    return result;
+  });
 
   Future<void> _photo() async {
     await _run(() async {

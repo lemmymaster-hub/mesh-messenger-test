@@ -1030,7 +1030,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
           Container(
             width: double.infinity, color: _bslPanel2,
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            child: Text('${_offlineAreaName ?? 'Pomjeri mapu na željeno područje'} • $_offlineCacheSize',
+            child: Text('${_offlineAreaName ?? _centerText()} • $_offlineCacheSize',
               maxLines: 1, overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 10, color: _bslTextMuted)),
           ),
