@@ -20,8 +20,14 @@ jobs:
       - name: Reuse test APK signing key
         uses: actions/cache@v5
         with:
-          path: ~/.android/debug.keystore
-          key: nrn-android-debug-signing-v1
+          path: android/.nrn-signing/debug.keystore
+          key: nrn-android-test-signing-v2
+      - name: Ensure test APK signing key exists
+        run: |
+          mkdir -p android/.nrn-signing
+          if [ ! -f android/.nrn-signing/debug.keystore ]; then
+            keytool -genkeypair -keystore android/.nrn-signing/debug.keystore -storepass android -keypass android -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
+          fi
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
