@@ -155,7 +155,9 @@ class _ChatScreenState extends State<ChatScreen>
       await nearbyService.loadOrCreateDeviceId();
       await _loadSelectedRole();
       await _operations.ready;
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       for (final e in _operations.incidents.entries) {
         if (e.value['status'] != 'resolved') {
           meshSosLocations[e.key] = Map.of(e.value);
@@ -166,7 +168,9 @@ class _ChatScreenState extends State<ChatScreen>
         }
       }
       internetAvailable = await nearbyService.hasInternetConnection();
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       if (savedName == null) {
         _addSystemMessage('Klikni ✏️ gore desno i unesi ime uređaja.');
@@ -190,10 +194,14 @@ class _ChatScreenState extends State<ChatScreen>
     });
 
     nearbyService.onLog = (log) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       setState(() {
         _logs.insert(0, log);
-        if (_logs.length > 500) _logs.removeRange(500, _logs.length);
+        if (_logs.length > 500) {
+          _logs.removeRange(500, _logs.length);
+        }
       });
     };
 
@@ -207,11 +215,14 @@ class _ChatScreenState extends State<ChatScreen>
           timestamp,
           batteryLevel,
         ) {
-          if (!mounted) return;
+          if (!mounted) {
+            return;
+          }
 
           if (((meshUserLocations[deviceId]?['time'] as num?)?.toInt() ?? 0) >
-              timestamp)
+              timestamp) {
             return;
+          }
           setState(() {
             meshUserLocations[deviceId] = {
               'deviceId': deviceId,
@@ -232,7 +243,9 @@ class _ChatScreenState extends State<ChatScreen>
         };
 
     nearbyService.onMessageReceived = (meshMessage, endpointId) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       final message = meshMessage.text;
       final type = meshMessage.type;
@@ -246,7 +259,9 @@ class _ChatScreenState extends State<ChatScreen>
       var shouldStopSosAlarm = false;
 
       setState(() {
-        if (type == 'command') return;
+        if (type == 'command') {
+          return;
+        }
         if (type == 'sos') {
           final sosId = meshMessage.sosId ?? meshMessage.messageId;
           var latitude = meshMessage.latitude;
@@ -396,7 +411,9 @@ class _ChatScreenState extends State<ChatScreen>
     };
 
     nearbyService.onDevicesChanged = () {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       _syncLocationBroadcastWithConnections();
       _changed();
@@ -419,7 +436,9 @@ class _ChatScreenState extends State<ChatScreen>
     try {
       final level = await _battery.batteryLevel;
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       setState(() {
         _batteryLevel = level;
@@ -468,7 +487,9 @@ class _ChatScreenState extends State<ChatScreen>
 
     await _playIncomingSosAlarmCycle(isRepeat: false);
 
-    if (!mounted || !incomingSosActive) return;
+    if (!mounted || !incomingSosActive) {
+      return;
+    }
 
     sosAlarmRepeatTimer = Timer.periodic(const Duration(minutes: 3), (timer) {
       if (!mounted || !incomingSosActive) {
@@ -481,7 +502,9 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _playIncomingSosAlarmCycle({required bool isRepeat}) async {
-    if (!mounted || !incomingSosActive) return;
+    if (!mounted || !incomingSosActive) {
+      return;
+    }
 
     sosAlarmStopTimer?.cancel();
 
@@ -491,10 +514,14 @@ class _ChatScreenState extends State<ChatScreen>
 
     _sosPulseController.repeat(reverse: true);
     await _sosAudioPlayer.stop();
-    if (!mounted || !incomingSosActive) return;
+    if (!mounted || !incomingSosActive) {
+      return;
+    }
 
     await _sosAudioPlayer.setReleaseMode(ReleaseMode.loop);
-    if (!mounted || !incomingSosActive) return;
+    if (!mounted || !incomingSosActive) {
+      return;
+    }
 
     await _sosAudioPlayer.play(AssetSource('sounds/sos_siren.mp3'));
     if (!mounted || !incomingSosActive) {
@@ -511,7 +538,9 @@ class _ChatScreenState extends State<ChatScreen>
 
     sosAlarmStopTimer = Timer(const Duration(seconds: 30), () async {
       await _sosAudioPlayer.stop();
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       setState(() {
         sosAlarmActive = false;
@@ -528,7 +557,9 @@ class _ChatScreenState extends State<ChatScreen>
     sosAlarmRepeatTimer = null;
     sosAlarmStopTimer = null;
 
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     setState(() {
       sosAlarmActive = false;
@@ -567,12 +598,16 @@ class _ChatScreenState extends State<ChatScreen>
 
   Future<void> _saveDeviceName() async {
     final name = _nameController.text.trim();
-    if (name.isEmpty) return;
+    if (name.isEmpty) {
+      return;
+    }
 
     await nearbyService.setDeviceName(name);
     await _saveSelectedRole(selectedRole);
 
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     setState(() {
       showNameEditor = false;
@@ -639,7 +674,9 @@ class _ChatScreenState extends State<ChatScreen>
         longitude: sosPosition?.longitude,
       );
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       if (sendResult == null) {
         setState(() {
@@ -709,12 +746,16 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _cancelSos() async {
-    if (activeSosId == null) return;
+    if (activeSosId == null) {
+      return;
+    }
 
     final sosId = activeSosId!;
     final sendResult = await nearbyService.sendSosCancel(sosId: sosId);
 
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     if (sendResult == null) {
       setState(() {
@@ -754,11 +795,16 @@ class _ChatScreenState extends State<ChatScreen>
 
   bool _sendingChat = false;
   Future<void> _sendMessage() async {
-    if (_sendingChat) return;
+    if (_sendingChat) {
+      return;
+    }
     final text = _controller.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty) {
+      return;
+    }
     final privateMode = selectedPrivateDeviceName != null;
-    if (privateMode && selectedPrivateDeviceId == null) {
+    final receiverId = selectedPrivateDeviceId;
+    if (privateMode && receiverId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -773,10 +819,12 @@ class _ChatScreenState extends State<ChatScreen>
       final result = privateMode
           ? await nearbyService.sendPrivateMessage(
               text: text,
-              receiverDeviceId: selectedPrivateDeviceId!,
+              receiverDeviceId: receiverId!,
             )
           : await nearbyService.sendMessage(text);
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       if (result == null || !result.delivered) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -799,12 +847,17 @@ class _ChatScreenState extends State<ChatScreen>
           'Poruka predata direktnim vezama: ${result.deliveredCount}/${result.attemptedCount}; prijem nije potvrđen.',
         );
       });
+      await _operations.recordOutgoing(text, privateMode ? receiverId : null);
+      if (!mounted) {
+        return;
+      }
       _controller.clear();
       _scrollToBottom();
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('Poruka nije poslata: $e')));
+      }
     } finally {
       _sendingChat = false;
     }
@@ -821,7 +874,9 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _startLocationBroadcast() {
-    if (locationBroadcastTimer?.isActive ?? false) return;
+    if (locationBroadcastTimer?.isActive ?? false) {
+      return;
+    }
 
     unawaited(_broadcastMyLocation());
 
@@ -866,7 +921,9 @@ class _ChatScreenState extends State<ChatScreen>
         batteryLevel: _batteryLevel,
       );
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       setState(() {
         meshUserLocations[nearbyService.deviceId] = {
@@ -882,7 +939,9 @@ class _ChatScreenState extends State<ChatScreen>
         _changed();
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       setState(() {
         _logs.insert(0, 'Greška slanja lokacije: $e');
@@ -894,8 +953,12 @@ class _ChatScreenState extends State<ChatScreen>
 
   void _scrollToBottom() {
     Future.delayed(const Duration(milliseconds: 100), () {
-      if (!mounted) return;
-      if (!_scrollController.hasClients) return;
+      if (!mounted) {
+        return;
+      }
+      if (!_scrollController.hasClients) {
+        return;
+      }
 
       _scrollController.animateTo(
         _scrollController.position.maxScrollExtent,
@@ -1005,7 +1068,9 @@ class _ChatScreenState extends State<ChatScreen>
     String reason = '',
   }) async {
     final sosId = incomingSosId;
-    if (sosId == null) return false;
+    if (sosId == null) {
+      return false;
+    }
 
     final result = await nearbyService.sendSosResponse(
       sosId: sosId,
@@ -1013,18 +1078,22 @@ class _ChatScreenState extends State<ChatScreen>
       reason: reason,
     );
 
-    if (!mounted) return false;
+    if (!mounted) {
+      return false;
+    }
 
     if (result == null) {
       setState(() {
         _addSystemMessage(
-          'SOS odgovor NIJE ISPORUČEN. Reaguj ponovo kada se mesh veza uspostavi.',
+          'SOS odgovor NIJE POSLAT. Reaguj ponovo kada se mesh veza uspostavi.',
         );
       });
       return false;
     }
 
-    if (incomingSosId != sosId) return false;
+    if (incomingSosId != sosId) {
+      return false;
+    }
 
     _stopIncomingSosAlarm();
 
@@ -1049,7 +1118,9 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _showRejectSosDialog() async {
-    if (incomingSosId == null) return;
+    if (incomingSosId == null) {
+      return;
+    }
 
     String selectedReason = 'Nisam u mogućnosti da pomognem';
     String customReason = '';
@@ -1066,65 +1137,55 @@ class _ChatScreenState extends State<ChatScreen>
                 style: TextStyle(color: Colors.white),
               ),
               content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    RadioListTile<String>(
-                      value: 'Nisam u mogućnosti da pomognem',
-                      groupValue: selectedReason,
-                      activeColor: Colors.redAccent,
-                      title: const Text(
-                        'Nisam u mogućnosti da pomognem',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                      onChanged: (value) {
-                        setDialogState(() {
-                          selectedReason = value!;
-                        });
-                      },
-                    ),
-                    RadioListTile<String>(
-                      value: 'Mislim da je lažni SOS',
-                      groupValue: selectedReason,
-                      activeColor: Colors.redAccent,
-                      title: const Text(
-                        'Mislim da je lažni SOS',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                      onChanged: (value) {
-                        setDialogState(() {
-                          selectedReason = value!;
-                        });
-                      },
-                    ),
-                    RadioListTile<String>(
-                      value: 'Drugi razlog',
-                      groupValue: selectedReason,
-                      activeColor: Colors.redAccent,
-                      title: const Text(
-                        'Drugi razlog',
-                        style: TextStyle(color: Colors.white),
-                      ),
-                      onChanged: (value) {
-                        setDialogState(() {
-                          selectedReason = value!;
-                        });
-                      },
-                    ),
-                    if (selectedReason == 'Drugi razlog')
-                      TextField(
-                        style: const TextStyle(color: Colors.white),
-                        decoration: InputDecoration(
-                          hintText: 'Unesi razlog...',
-                          hintStyle: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.5),
-                          ),
+                child: RadioGroup<String>(
+                  groupValue: selectedReason,
+                  onChanged: (value) {
+                    if (value != null) {
+                      setDialogState(() => selectedReason = value);
+                    }
+                  },
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      RadioListTile<String>(
+                        value: 'Nisam u mogućnosti da pomognem',
+                        activeColor: Colors.redAccent,
+                        title: const Text(
+                          'Nisam u mogućnosti da pomognem',
+                          style: TextStyle(color: Colors.white),
                         ),
-                        onChanged: (value) {
-                          customReason = value.trim();
-                        },
                       ),
-                  ],
+                      RadioListTile<String>(
+                        value: 'Mislim da je lažni SOS',
+                        activeColor: Colors.redAccent,
+                        title: const Text(
+                          'Mislim da je lažni SOS',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ),
+                      RadioListTile<String>(
+                        value: 'Drugi razlog',
+                        activeColor: Colors.redAccent,
+                        title: const Text(
+                          'Drugi razlog',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ),
+                      if (selectedReason == 'Drugi razlog')
+                        TextField(
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            hintText: 'Unesi razlog...',
+                            hintStyle: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.5),
+                            ),
+                          ),
+                          onChanged: (value) {
+                            customReason = value.trim();
+                          },
+                        ),
+                    ],
+                  ),
                 ),
               ),
               actions: [
@@ -1144,7 +1205,9 @@ class _ChatScreenState extends State<ChatScreen>
                         ? customReason
                         : selectedReason;
 
-                    if (reason.isEmpty) return;
+                    if (reason.isEmpty) {
+                      return;
+                    }
 
                     Navigator.of(dialogContext).pop(reason);
                   },
@@ -1157,7 +1220,9 @@ class _ChatScreenState extends State<ChatScreen>
       },
     );
 
-    if (result == null || result.isEmpty) return;
+    if (result == null || result.isEmpty) {
+      return;
+    }
 
     await _respondToIncomingSos(responseType: 'sos_reject', reason: result);
   }
@@ -1408,7 +1473,7 @@ class _ChatScreenState extends State<ChatScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Direktno isporučen na $sosSentCount uređaja',
+            'Predato na $sosSentCount direktnih veza',
             style: const TextStyle(
               color: Colors.redAccent,
               fontSize: 12,
@@ -2009,7 +2074,9 @@ class _ChatScreenState extends State<ChatScreen>
                           );
                         }).toList(),
                         onChanged: (value) {
-                          if (value == null) return;
+                          if (value == null) {
+                            return;
+                          }
 
                           setState(() {
                             selectedRole = value;

@@ -14,8 +14,9 @@ LatLng? meshPoint(Map<String, dynamic> data) {
       !lat.isFinite ||
       !lng.isFinite ||
       lat.abs() > 90 ||
-      lng.abs() > 180)
+      lng.abs() > 180) {
     return null;
+  }
   return LatLng(lat, lng);
 }
 
@@ -52,23 +53,31 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
     widget.focus?.addListener(_focus);
     getApplicationDocumentsDirectory()
         .then((dir) {
-          if (mounted) setState(() => _root = '${dir.path}/offline_tiles');
+          if (mounted) {
+            setState(() => _root = '${dir.path}/offline_tiles');
+          }
         })
         .catchError((Object _) {});
   }
 
   void _focus() {
     final point = widget.focus?.value;
-    if (_ready && point != null) _controller.move(point, 15);
+    if (_ready && point != null) {
+      _controller.move(point, 15);
+    }
   }
 
   void _fit() {
-    if (!_ready) return;
+    if (!_ready) {
+      return;
+    }
     final points = [
       ...widget.meshUserLocations.values,
       ...widget.meshSosLocations.values,
     ].map(meshPoint).whereType<LatLng>().toList();
-    if (points.isEmpty) return;
+    if (points.isEmpty) {
+      return;
+    }
     if (points.length == 1) {
       _controller.move(points.first, 14);
       return;
@@ -85,24 +94,28 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
   Future<void> _locate() async {
     try {
       var p = await Geolocator.checkPermission();
-      if (p == LocationPermission.denied)
+      if (p == LocationPermission.denied) {
         p = await Geolocator.requestPermission();
+      }
       if (p == LocationPermission.denied ||
-          p == LocationPermission.deniedForever)
+          p == LocationPermission.deniedForever) {
         throw StateError('Dozvoli pristup lokaciji u postavkama telefona.');
+      }
       final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
           timeLimit: Duration(seconds: 15),
         ),
       );
-      if (mounted && _ready)
+      if (mounted && _ready) {
         _controller.move(LatLng(position.latitude, position.longitude), 15);
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Lokacija nije dostupna: $e')));
+      }
     }
   }
 
@@ -110,8 +123,9 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
     final query = _search.text.trim().toLowerCase();
     final coords = query.split(',');
     LatLng? point;
-    if (coords.length == 2)
+    if (coords.length == 2) {
       point = meshPoint({'lat': coords[0], 'lng': coords[1]});
+    }
     for (final e in widget.meshUserLocations.entries) {
       if (query.isNotEmpty &&
           '${e.value['deviceName'] ?? e.key}'.toLowerCase().contains(query)) {
@@ -186,7 +200,9 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
     if (_users) {
       for (final e in widget.meshUserLocations.entries) {
         final p = meshPoint(e.value);
-        if (p == null) continue;
+        if (p == null) {
+          continue;
+        }
         final time = (e.value['time'] as num?)?.toInt() ?? 0;
         markers.add(
           Marker(
@@ -207,7 +223,9 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
     if (_sos) {
       for (final e in widget.meshSosLocations.entries) {
         final p = meshPoint(e.value);
-        if (p == null) continue;
+        if (p == null) {
+          continue;
+        }
         markers.add(
           Marker(
             point: p,
@@ -226,7 +244,9 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
     if (_resources) {
       for (final resource in widget.resources) {
         final p = meshPoint(resource);
-        if (p == null) continue;
+        if (p == null) {
+          continue;
+        }
         markers.add(
           Marker(
             point: p,
@@ -322,22 +342,24 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
                   IconButton(
                     tooltip: 'Uvećaj',
                     onPressed: () {
-                      if (_ready)
+                      if (_ready) {
                         _controller.move(
                           _controller.camera.center,
                           (_controller.camera.zoom + 1).clamp(3, 19),
                         );
+                      }
                     },
                     icon: const Icon(Icons.add),
                   ),
                   IconButton(
                     tooltip: 'Umanji',
                     onPressed: () {
-                      if (_ready)
+                      if (_ready) {
                         _controller.move(
                           _controller.camera.center,
                           (_controller.camera.zoom - 1).clamp(3, 19),
                         );
+                      }
                     },
                     icon: const Icon(Icons.remove),
                   ),
@@ -355,9 +377,15 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
                     tooltip: 'Slojevi',
                     icon: const Icon(Icons.layers),
                     onSelected: (value) => setState(() {
-                      if (value == 'users') _users = !_users;
-                      if (value == 'sos') _sos = !_sos;
-                      if (value == 'resources') _resources = !_resources;
+                      if (value == 'users') {
+                        _users = !_users;
+                      }
+                      if (value == 'sos') {
+                        _sos = !_sos;
+                      }
+                      if (value == 'resources') {
+                        _resources = !_resources;
+                      }
                       if (value == 'terrain') {
                         _terrain = !_terrain;
                         _satellite = false;

@@ -44,10 +44,11 @@ class OperationsStore extends ChangeNotifier {
           final source = data[pair.$2];
           if (source is Map) {
             for (final entry in source.entries) {
-              if (entry.value is Map)
+              if (entry.value is Map) {
                 pair.$1[entry.key.toString()] = Map<String, dynamic>.from(
                   entry.value,
                 );
+              }
             }
           }
         }
@@ -57,10 +58,11 @@ class OperationsStore extends ChangeNotifier {
           (resources, 'resources'),
         ]) {
           final source = data[pair.$2];
-          if (source is List)
+          if (source is List) {
             pair.$1.addAll(
               source.whereType<Map>().map((e) => Map<String, dynamic>.from(e)),
             );
+          }
         }
         readiness = data['readiness']?.toString() ?? 'Redovna';
         _resolved.addAll((data['resolved'] as List? ?? []).whereType<String>());
@@ -73,7 +75,9 @@ class OperationsStore extends ChangeNotifier {
       receive(message);
     }
     _pending.clear();
-    if (!_disposed) notifyListeners();
+    if (!_disposed) {
+      notifyListeners();
+    }
   }
 
   Future<void> save() {
@@ -90,22 +94,29 @@ class OperationsStore extends ChangeNotifier {
     _writes = _writes.then((_) async {
       try {
         final prefs = await SharedPreferences.getInstance();
-        if (!await prefs.setString('nrn_operations_v1', snapshot))
+        if (!await prefs.setString('nrn_operations_v1', snapshot)) {
           throw StateError('write');
+        }
         storageError = null;
       } catch (_) {
         storageError = 'Promjene nisu sačuvane na uređaju.';
       }
-      if (!_disposed) notifyListeners();
+      if (!_disposed) {
+        notifyListeners();
+      }
     });
     return _writes;
   }
 
   void syncIncidents(Map<String, Map<String, dynamic>> live) {
-    if (!_loaded) return;
+    if (!_loaded) {
+      return;
+    }
     var changed = false;
     for (final e in live.entries) {
-      if (_resolved.contains(e.key)) continue;
+      if (_resolved.contains(e.key)) {
+        continue;
+      }
       final existing = incidents[e.key];
       if (existing == null) {
         incidents[e.key] = Map.of(e.value);
@@ -118,7 +129,9 @@ class OperationsStore extends ChangeNotifier {
   }
 
   void receive(MeshMessage message) {
-    if (_disposed) return;
+    if (_disposed) {
+      return;
+    }
     if (!_loaded) {
       _pending.add(message);
       return;
@@ -155,24 +168,30 @@ class OperationsStore extends ChangeNotifier {
         }
       } else if (message.type == 'group' || message.type == 'private') {
         if (message.type == 'private' &&
-            message.receiverId != transport.deviceId)
+            message.receiverId != transport.deviceId) {
           return;
+        }
         communications.add({
           'sender': message.senderName,
+          'senderId': message.senderId,
+          'receiverId': message.receiverId,
           'text': message.text,
           'time': message.timestamp,
           'channel': message.type,
         });
       } else if (message.type == 'command') {
         final decoded = jsonDecode(message.text);
-        if (decoded is! Map<String, dynamic>) return;
+        if (decoded is! Map<String, dynamic>) {
+          return;
+        }
         if (!_apply(
           decoded,
           message.senderId,
           message.senderName,
           message.timestamp,
-        ))
+        )) {
           return;
+        }
       } else {
         return;
       }
@@ -187,29 +206,41 @@ class OperationsStore extends ChangeNotifier {
   bool _apply(Map<String, dynamic> data, String sender, String name, int time) {
     final op = data['op'];
     final body = data['data'];
-    if (body is! Map<String, dynamic>) return false;
+    if (body is! Map<String, dynamic>) {
+      return false;
+    }
     final id = body['id'];
-    if (id is! String || id.isEmpty || id.length > 100) return false;
+    if (id is! String || id.isEmpty || id.length > 100) {
+      return false;
+    }
     if (op == 'team') {
       if (body['name'] is! String ||
           body['members'] is! List ||
           (body['members'] as List).isEmpty ||
-          !(body['members'] as List).every((e) => e is String))
+          !(body['members'] as List).every((e) => e is String)) {
         return false;
-      if (teams[id] != null && teams[id]!['owner'] != sender) return false;
+      }
+      if (teams[id] != null && teams[id]!['owner'] != sender) {
+        return false;
+      }
       if ((body['name'] as String).trim().isEmpty ||
           (body['name'] as String).length > 80 ||
-          (body['members'] as List).length > 100)
+          (body['members'] as List).length > 100) {
         return false;
+      }
       final color = body['color'];
-      if (color != null && (color is! int || color < 0 || color > 0xffffffff))
+      if (color != null && (color is! int || color < 0 || color > 0xffffffff)) {
         return false;
+      }
       teams[id] = {...body, 'owner': sender};
     } else if (op == 'mission') {
       final team = teams[body['teamId']];
-      if (team == null || team['owner'] != sender || body['task'] is! String)
+      if (team == null || team['owner'] != sender || body['task'] is! String) {
         return false;
-      if (missions[id] != null) return false;
+      }
+      if (missions[id] != null) {
+        return false;
+      }
       missions[id] = {
         ...body,
         'owner': sender,
@@ -226,29 +257,37 @@ class OperationsStore extends ChangeNotifier {
             'Na lokaciji',
             'Završeno',
             'Odbijen',
-          ].contains(body['status']))
+          ].contains(body['status'])) {
         return false;
+      }
       final members = mission['members'] as List? ?? [];
-      if (!members.contains(sender)) return false;
+      if (!members.contains(sender)) {
+        return false;
+      }
       final progress = Map<String, dynamic>.from(
         mission['progress'] as Map? ?? {},
       );
       if ((progress[sender] as Map?)?['time'] is num &&
-          ((progress[sender] as Map)['time'] as num) > time)
+          ((progress[sender] as Map)['time'] as num) > time) {
         return false;
+      }
       progress[sender] = {'status': body['status'], 'time': time, 'name': name};
       mission['progress'] = progress;
     } else if (op == 'photo') {
-      if (body['bytes'] is! String || (body['bytes'] as String).length > 27000)
+      if (body['bytes'] is! String ||
+          (body['bytes'] as String).length > 27000) {
         return false;
+      }
       final bytes = base64Decode(body['bytes'] as String);
       if (bytes.length < 3 ||
           bytes.length > 20000 ||
           bytes[0] != 0xff ||
-          bytes[1] != 0xd8)
+          bytes[1] != 0xd8) {
         return false;
-      if (!photos.any((e) => e['id'] == id))
+      }
+      if (!photos.any((e) => e['id'] == id)) {
         photos.add({...body, 'sender': name, 'time': time});
+      }
     } else {
       return false;
     }
@@ -256,9 +295,12 @@ class OperationsStore extends ChangeNotifier {
   }
 
   void _trim() {
-    if (communications.length > 300)
+    if (communications.length > 300) {
       communications.removeRange(0, communications.length - 300);
-    if (photos.length > 24) photos.removeRange(0, photos.length - 24);
+    }
+    if (photos.length > 24) {
+      photos.removeRange(0, photos.length - 24);
+    }
   }
 
   Future<String> publish(String op, Map<String, dynamic> body) async {
@@ -286,8 +328,9 @@ class OperationsStore extends ChangeNotifier {
 
   Future<String> transmit(Map<String, dynamic> data) async {
     final result = await transport.sendCommand(data);
-    if (result == null || !result.delivered)
+    if (result == null || !result.delivered) {
       return 'Sačuvano lokalno • nije poslato';
+    }
     return 'Predato vezama: ${result.deliveredCount}/${result.attemptedCount} • čeka odgovor primaoca';
   }
 
@@ -298,10 +341,37 @@ class OperationsStore extends ChangeNotifier {
             text: text,
             receiverDeviceId: receiver,
           );
-    if (result == null || !result.delivered)
+    if (result == null || !result.delivered) {
       return 'Nije poslato • nema uspješne veze';
+    }
+    await recordOutgoing(text, receiver);
+    return 'Predato vezama: ${result.deliveredCount}/${result.attemptedCount}';
+  }
+
+  List<Map<String, dynamic>> conversation(String? receiver) {
+    return communications
+        .where((message) {
+          if (receiver == null) {
+            return message['channel'] == 'group';
+          }
+          return message['channel'] == 'private' &&
+              ((message['senderId'] == transport.deviceId &&
+                      message['receiverId'] == receiver) ||
+                  (message['senderId'] == receiver &&
+                      message['receiverId'] == transport.deviceId));
+        })
+        .toList(growable: false);
+  }
+
+  Future<void> recordOutgoing(String text, String? receiver) async {
+    await ready;
+    if (_disposed) {
+      return;
+    }
     communications.add({
       'sender': 'Ja',
+      'senderId': transport.deviceId,
+      'receiverId': receiver ?? 'ALL',
       'text': text,
       'time': DateTime.now().millisecondsSinceEpoch,
       'channel': receiver == null ? 'group' : 'private',
@@ -309,12 +379,31 @@ class OperationsStore extends ChangeNotifier {
     _trim();
     notifyListeners();
     await save();
-    return 'Predato vezama: ${result.deliveredCount}/${result.attemptedCount}';
+  }
+
+  Future<void> recordSosResponse(String id, String responseType) async {
+    await ready;
+    if (_disposed || !['sos_accept', 'sos_reject'].contains(responseType)) {
+      return;
+    }
+    final incident = incidents[id];
+    if (incident == null) {
+      return;
+    }
+    final responses = Map<String, dynamic>.from(
+      incident['responses'] as Map? ?? {},
+    );
+    responses[transport.deviceId] = responseType;
+    incident['responses'] = responses;
+    notifyListeners();
+    await save();
   }
 
   Future<void> resolveLocal(String id) async {
     await ready;
-    if (incidents[id] != null) incidents[id]!['status'] = 'resolved';
+    if (incidents[id] != null) {
+      incidents[id]!['status'] = 'resolved';
+    }
     _resolved.add(id);
     await save();
   }

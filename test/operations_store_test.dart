@@ -13,6 +13,13 @@ class TestTransport extends NearbyService {
   }
   Map<String, dynamic>? lastCommand;
   @override
+  Future<MeshSendResult?> sendMessage(String text) async => null;
+  @override
+  Future<MeshSendResult?> sendPrivateMessage({
+    required String text,
+    required String receiverDeviceId,
+  }) async => null;
+  @override
   Future<MeshSendResult?> sendCommand(Map<String, dynamic> data) async {
     lastCommand = data;
     return null;
@@ -138,5 +145,62 @@ void main() {
     expect(ops.teams, isEmpty);
     expect(ops.photos, isEmpty);
     ops.dispose();
+  });
+  test('private histories are isolated by stable peer ID', () async {
+    final ops = OperationsStore(TestTransport());
+    await ops.ready;
+    MeshMessage chat(
+      String sender,
+      String receiver,
+      String type,
+      String text,
+    ) => MeshMessage(
+      messageId: text,
+      senderId: sender,
+      senderName: 'Isto ime',
+      receiverId: receiver,
+      text: text,
+      type: type,
+      hopCount: 0,
+      maxHops: 5,
+      timestamp: 100,
+    );
+    ops.receive(chat('a', 'commander', 'private', 'Od A'));
+    ops.receive(chat('b', 'commander', 'private', 'Od B'));
+    ops.receive(chat('a', 'stranger', 'private', 'Nije za mene'));
+    ops.receive(chat('a', 'ALL', 'group', 'Za sve'));
+    await ops.recordOutgoing('Za A', 'a');
+    expect(ops.conversation('a').map((e) => e['text']), ['Od A', 'Za A']);
+    expect(ops.conversation('b').map((e) => e['text']), ['Od B']);
+    expect(ops.conversation(null).map((e) => e['text']), ['Za sve']);
+    await ops.save();
+    ops.dispose();
+  });
+  test('failed send does not create a sent-history entry', () async {
+    final ops = OperationsStore(TestTransport());
+    await ops.ready;
+    expect(
+      await ops.communicate('Nije predato', 'a'),
+      startsWith('Nije poslato'),
+    );
+    expect(ops.communications, isEmpty);
+    ops.dispose();
+  });
+  test('local SOS response survives restart in operational ledger', () async {
+    final transport = TestTransport();
+    final ops = OperationsStore(transport);
+    await ops.ready;
+    ops.syncIncidents({
+      's1': {'senderId': 'a', 'status': 'active'},
+    });
+    await ops.recordSosResponse('s1', 'sos_accept');
+    ops.dispose();
+    final restored = OperationsStore(transport);
+    await restored.ready;
+    expect(
+      (restored.incidents['s1']!['responses'] as Map)['commander'],
+      'sos_accept',
+    );
+    restored.dispose();
   });
 }

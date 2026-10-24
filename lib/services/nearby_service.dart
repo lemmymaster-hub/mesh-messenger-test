@@ -123,8 +123,9 @@ class NearbyService extends ChangeNotifier {
     }
 
     if (connectedDevices.containsKey(endpointId) ||
-        !_connecting.add(endpointId))
+        !_connecting.add(endpointId)) {
       return;
+    }
     try {
       await Nearby().requestConnection(
         deviceName,
@@ -490,7 +491,9 @@ class NearbyService extends ChangeNotifier {
       return;
     }
 
-    if (connectedDevices.isEmpty) return;
+    if (connectedDevices.isEmpty) {
+      return;
+    }
 
     final relayedMessage = originalMessage.copyWith(
       hopCount: originalMessage.hopCount + 1,
@@ -645,7 +648,9 @@ class NearbyService extends ChangeNotifier {
       return null;
     }
 
-    if (sosId.trim().isEmpty) return null;
+    if (sosId.trim().isEmpty) {
+      return null;
+    }
 
     if (deviceId.isEmpty) {
       await loadOrCreateDeviceId();
@@ -676,7 +681,9 @@ class NearbyService extends ChangeNotifier {
       logLabel: 'SOS cancel',
     );
 
-    if (!result.delivered) return null;
+    if (!result.delivered) {
+      return null;
+    }
 
     onLog?.call('SOS cancel poslat: $sosId');
     return result;
@@ -794,8 +801,12 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<MeshSendResult?> sendCommand(Map<String, dynamic> data) async {
-    if (deviceName.isEmpty || connectedDevices.isEmpty) return null;
-    if (deviceId.isEmpty) await loadOrCreateDeviceId();
+    if (deviceName.isEmpty || connectedDevices.isEmpty) {
+      return null;
+    }
+    if (deviceId.isEmpty) {
+      await loadOrCreateDeviceId();
+    }
     final message = MeshMessage(
       messageId: uuid.v4(),
       senderId: deviceId,
@@ -836,10 +847,15 @@ class NearbyService extends ChangeNotifier {
   @override
   void dispose() {
     _events.close();
-    if (advertising) Nearby().stopAdvertising();
-    if (discovering) Nearby().stopDiscovery();
-    if (connectedDevices.isNotEmpty || _connecting.isNotEmpty)
+    if (advertising) {
+      Nearby().stopAdvertising();
+    }
+    if (discovering) {
+      Nearby().stopDiscovery();
+    }
+    if (connectedDevices.isNotEmpty || _connecting.isNotEmpty) {
       Nearby().stopAllEndpoints();
+    }
     super.dispose();
   }
 }

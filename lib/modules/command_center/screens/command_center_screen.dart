@@ -81,10 +81,14 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
     super.initState();
     _changes = Listenable.merge([widget.live, mesh, ops]);
     _clock = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (mounted) setState(() {});
+      if (mounted) {
+        setState(() {});
+      }
     });
     ops.ready.then((_) {
-      if (mounted) ops.syncIncidents(widget.meshSosLocations);
+      if (mounted) {
+        ops.syncIncidents(widget.meshSosLocations);
+      }
     });
   }
 
@@ -105,25 +109,32 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
       id;
   String _time(dynamic value) {
     final stamp = value is num ? value.toInt() : 0;
-    if (stamp <= 0) return '—';
+    if (stamp <= 0) {
+      return '—';
+    }
     final d = DateTime.fromMillisecondsSinceEpoch(stamp).toLocal();
     return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 
   void _toast(String text) {
-    if (mounted)
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    }
   }
 
   Future<void> _run(Future<String> Function() action) async {
-    if (_busy) return;
+    if (_busy) {
+      return;
+    }
     setState(() => _busy = true);
     try {
       _toast(await action());
     } catch (e) {
       _toast('Akcija nije završena: $e');
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -160,7 +171,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
                   ),
                 ),
               ),
-              if (action != null) action,
+              ?action,
             ],
           ),
         ),
@@ -441,14 +452,11 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
                     sosId: id,
                     responseType: 'sos_accept',
                   );
-                  if (result == null) return 'Odgovor nije poslat';
+                  if (result == null) {
+                    return 'Odgovor nije poslat';
+                  }
                   widget.onSosResponded(id);
-                  final responses = Map<String, dynamic>.from(
-                    incident['responses'] as Map? ?? {},
-                  );
-                  responses[mesh.deviceId] = 'sos_accept';
-                  incident['responses'] = responses;
-                  await ops.save();
+                  await ops.recordSosResponse(id, 'sos_accept');
                   return 'Prihvatanje predato vezama: ${result.deliveredCount}';
                 });
               },
@@ -532,7 +540,9 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
   );
   Future<void> _createTeam() async {
     await ops.ready;
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
     final name = TextEditingController();
     final selected = <String>{};
     final users = {...mesh.knownDevices, mesh.deviceId: mesh.deviceName}
@@ -598,7 +608,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
       ),
     );
     // Rebuild validity as the user types without recreating the controller.
-    if (result == true)
+    if (result == true) {
       await _run(
         () => ops.publish('team', {
           'id': const Uuid().v4(),
@@ -607,6 +617,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
           'color': blue.toARGB32(),
         }),
       );
+    }
     name.dispose();
   }
 
@@ -736,7 +747,9 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
             ),
             FilledButton(
               onPressed: () {
-                if (task.text.trim().isNotEmpty) Navigator.pop(context, true);
+                if (task.text.trim().isNotEmpty) {
+                  Navigator.pop(context, true);
+                }
               },
               child: const Text('Dodijeli'),
             ),
@@ -744,7 +757,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
         ),
       ),
     );
-    if (result == true)
+    if (result == true) {
       await _run(
         () => ops.publish('mission', {
           'id': const Uuid().v4(),
@@ -754,6 +767,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
           'sosId': sosId,
         }),
       );
+    }
     task.dispose();
   }
 
@@ -815,8 +829,9 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
                 Navigator.pop(context);
                 _run(() async {
                   final team = ops.teams[m['teamId']];
-                  if (team != null)
+                  if (team != null) {
                     await ops.transmit({'op': 'team', 'data': team});
+                  }
                   return ops.transmit({'op': 'mission', 'data': m});
                 });
               },
@@ -856,7 +871,9 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
   );
   Widget _communications() {
     final recipients = {...mesh.knownDevices}..remove(mesh.deviceId);
-    if (!recipients.containsKey(_recipient)) _recipient = null;
+    if (!recipients.containsKey(_recipient)) {
+      _recipient = null;
+    }
     return _box(
       'Komunikacije',
       Column(
@@ -888,12 +905,12 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
             ),
           ),
           Expanded(
-            child: ops.communications.isEmpty
+            child: messages.isEmpty
                 ? _empty('Nema poruka')
                 : ListView(
                     reverse: true,
                     children: [
-                      for (final m in ops.communications.reversed)
+                      for (final m in messages.reversed)
                         ListTile(
                           dense: true,
                           title: Text(
@@ -931,12 +948,16 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
                       ? null
                       : () => _run(() async {
                           final text = _message.text.trim();
-                          if (text.isEmpty) return 'Upiši poruku';
+                          if (text.isEmpty) {
+                            return 'Upiši poruku';
+                          }
                           final result = await ops.communicate(
                             text,
                             _recipient,
                           );
-                          if (!result.startsWith('Nije')) _message.clear();
+                          if (!result.startsWith('Nije')) {
+                            _message.clear();
+                          }
                           return result;
                         }),
                   icon: const Icon(Icons.send, color: blue),
@@ -957,13 +978,16 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
         maxHeight: 320,
         imageQuality: 25,
       );
-      if (file == null) return 'Odabir otkazan';
+      if (file == null) {
+        return 'Odabir otkazan';
+      }
       final bytes = await file.readAsBytes();
       if (bytes.length > 20000 ||
           bytes.length < 3 ||
           bytes[0] != 0xff ||
-          bytes[1] != 0xd8)
+          bytes[1] != 0xd8) {
         return 'Odaberi manju JPEG fotografiju (do 20 KB).';
+      }
       return ops.publish('photo', {
         'id': const Uuid().v4(),
         'bytes': base64Encode(bytes),
@@ -1217,7 +1241,9 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
           ),
           FilledButton(
             onPressed: () {
-              if (name.text.trim().isEmpty) return;
+              if (name.text.trim().isEmpty) {
+                return;
+              }
               if ((lat.text.trim().isNotEmpty || lng.text.trim().isNotEmpty) &&
                   meshPoint({'lat': lat.text, 'lng': lng.text}) == null) {
                 _toast('Neispravne koordinate');
@@ -1230,7 +1256,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
         ],
       ),
     );
-    if (ok == true)
+    if (ok == true) {
       await ops.addResource({
         'id': const Uuid().v4(),
         'name': name.text.trim(),
@@ -1239,6 +1265,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
         'lat': double.tryParse(lat.text),
         'lng': double.tryParse(lng.text),
       });
+    }
     name.dispose();
     lat.dispose();
     lng.dispose();
@@ -1269,7 +1296,9 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
               DropdownMenuItem(value: value, child: Text(value)),
           ],
           onChanged: (value) {
-            if (value != null) ops.setReadiness(value);
+            if (value != null) {
+              ops.setReadiness(value);
+            }
           },
         ),
         const SizedBox(height: 16),
@@ -1308,7 +1337,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
     ),
   );
   Widget _dashboard(double width) {
-    if (width < 950)
+    if (width < 950) {
       return ListView(
         children: [
           SizedBox(height: 420, child: _map()),
@@ -1328,6 +1357,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
             ),
         ],
       );
+    }
     return LayoutBuilder(
       builder: (context, constraints) {
         final height = constraints.maxHeight < 720

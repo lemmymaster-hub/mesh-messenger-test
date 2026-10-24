@@ -10,7 +10,7 @@ Open the dashboard button in the chat toolbar. On large screens the layout follo
 - Map controls include zoom, fit all, GPS centering, local user/coordinate search, filters, topography and an optional online Esri imagery layer. OSM uses previously downloaded local tiles when available. Satellite/topographic layers require internet; no 3D or live imagery is claimed.
 - Teams and assignments persist locally. Create a team using known device IDs, assign a task with an optional SOS reference, then each member reports acceptance, travel, arrival, completion or rejection on their own device.
 - Offline operational edits remain local until explicitly retransmitted using the detail dialog. Sending is reported as submission to direct links, never as a remote receipt. A member's progress is the explicit response.
-- Group/private communications use the existing relay transport. A private message cannot silently become a broadcast if a peer's HELLO identity is unavailable.
+- Group/private communications use the existing relay transport. Histories are separated by stable peer IDs; sent messages from the main chat also appear in the matching command-center conversation. A private message cannot silently become a broadcast if a peer's HELLO identity is unavailable.
 - Photo wall sends a compressed JPEG up to 20 KB. At most 24 photos and 300 operational messages are kept in the local ledger. All participants must run this version for the new `command` protocol messages; older versions cannot relay that message type.
 - Resources (repeaters, vehicles, drones and equipment) are a local manual inventory with optional coordinates. They are not measured radio telemetry or hardware controls. Readiness is local to this center.
 - SOS events without GPS stay in the list. Cancellation is applied to the matching incident. Accepting through the command center also silences the matching chat alarm.
@@ -21,12 +21,12 @@ GitHub Actions runs dependency resolution, static analysis, regression tests, re
 
 ```sh
 flutter pub get
-flutter analyze --no-fatal-infos --no-fatal-warnings
+flutter analyze
 flutter test
 flutter build apk --debug
 ```
 
-Some legacy lint/deprecation notices remain in the chat/map implementation. CI treats compiler errors as failures. Android builds use Java 21 with the repository's AGP 9 / Gradle 9 setup.
+CI treats analyzer diagnostics as failures, including lint and deprecation notices. Android builds use Java 21 with the repository's AGP 9 / Gradle 9 setup.
 
 ## Required field verification
 
