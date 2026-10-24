@@ -181,7 +181,17 @@ void main() {
       final captureKey = GlobalKey();
       await tester.pumpWidget(
         MaterialApp(
-          theme: ThemeData.dark(),
+          theme:
+              ThemeData(
+                colorScheme: ColorScheme.fromSeed(
+                  seedColor: const Color(0xFF1687FF),
+                  brightness: Brightness.dark,
+                ),
+              ).copyWith(
+                textTheme: ThemeData.dark().textTheme.apply(
+                  fontFamily: 'ReviewSans',
+                ),
+              ),
           builder: (context, child) => MediaQuery(
             data: MediaQuery.of(context)
                 .copyWith(textScaler: TextScaler.linear(spec.$2)),
