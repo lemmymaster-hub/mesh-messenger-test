@@ -3,8 +3,6 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
-import 'dart:typed_data';
-
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -42,6 +40,7 @@ class NearbyService extends ChangeNotifier {
     notifyListeners();
   }
 
+  final Set<String> _connecting = {};
   bool advertising = false;
   bool discovering = false;
   final uuid = const Uuid();
@@ -123,6 +122,9 @@ class NearbyService extends ChangeNotifier {
       return;
     }
 
+    if (connectedDevices.containsKey(endpointId) ||
+        !_connecting.add(endpointId))
+      return;
     try {
       await Nearby().requestConnection(
         deviceName,
@@ -136,6 +138,7 @@ class NearbyService extends ChangeNotifier {
         'Zahtjev za povezivanje poslat: ${foundDevices[endpointId] ?? endpointId}',
       );
     } catch (e) {
+      _connecting.remove(endpointId);
       onLog?.call('Greška povezivanja: $e');
     }
   }
@@ -296,6 +299,7 @@ class NearbyService extends ChangeNotifier {
           foundDevices[id] = name;
           onLog?.call('Pronađen uređaj: $name');
           _devicesChanged();
+          unawaited(connectToDevice(id));
         },
         onEndpointLost: (String? id) {
           if (id != null) {
@@ -500,6 +504,7 @@ class NearbyService extends ChangeNotifier {
   }
 
   void _onConnectionResult(String id, Status status) {
+    _connecting.remove(id);
     onLog?.call('Rezultat konekcije $id: $status');
 
     if (status == Status.CONNECTED) {
@@ -514,6 +519,7 @@ class NearbyService extends ChangeNotifier {
   }
 
   void _onDisconnected(String id) {
+    _connecting.remove(id);
     connectedDevices.remove(id);
     endpointDeviceIds.remove(id);
     onLog?.call('Prekinuta konekcija: $id');
@@ -775,7 +781,9 @@ class NearbyService extends ChangeNotifier {
       timestamp: DateTime.now().millisecondsSinceEpoch,
       latitude: latitude,
       longitude: longitude,
-      batteryLevel: batteryLevel,
+      batteryLevel: batteryLevel >= 0 && batteryLevel <= 100
+          ? batteryLevel
+          : null,
     );
 
     _processedMessages.markIfNew(meshMessage.messageId);
@@ -816,6 +824,7 @@ class NearbyService extends ChangeNotifier {
 
     advertising = false;
     discovering = false;
+    _connecting.clear();
     foundDevices.clear();
     connectedDevices.clear();
     endpointDeviceIds.clear();
@@ -827,9 +836,10 @@ class NearbyService extends ChangeNotifier {
   @override
   void dispose() {
     _events.close();
-    Nearby().stopAdvertising();
-    Nearby().stopDiscovery();
-    Nearby().stopAllEndpoints();
+    if (advertising) Nearby().stopAdvertising();
+    if (discovering) Nearby().stopDiscovery();
+    if (connectedDevices.isNotEmpty || _connecting.isNotEmpty)
+      Nearby().stopAllEndpoints();
     super.dispose();
   }
 }

@@ -21,6 +21,7 @@ class CommandCenterScreen extends StatefulWidget {
     required this.batteryLevel,
     required this.onSos,
     required this.onCancelSos,
+    required this.onSosResponded,
     required this.onOfflineMaps,
   });
   final Map<String, Map<String, dynamic>> meshUserLocations, meshSosLocations;
@@ -30,6 +31,7 @@ class CommandCenterScreen extends StatefulWidget {
   final int Function() batteryLevel;
   final Future<void> Function() onSos, onCancelSos;
   final VoidCallback onOfflineMaps;
+  final void Function(String id) onSosResponded;
   @override
   State<CommandCenterScreen> createState() => _CommandCenterScreenState();
 }
@@ -181,10 +183,13 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
                 children: [
                   Text(
                     title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 9, color: Colors.white54),
                   ),
                   Text(
                     value,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 19,
@@ -426,6 +431,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
                     responseType: 'sos_accept',
                   );
                   if (result == null) return 'Odgovor nije poslat';
+                  widget.onSosResponded(id);
                   final responses = Map<String, dynamic>.from(
                     incident['responses'] as Map? ?? {},
                   );
@@ -1369,13 +1375,22 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
     0 => _dashboard(width),
     1 => _map(),
     2 => _sosPanel(),
-    3 => Row(
-      children: [
-        Expanded(child: _dispatch()),
-        const SizedBox(width: 10),
-        Expanded(child: _missionPanel()),
-      ],
-    ),
+    3 =>
+      width < 650
+          ? ListView(
+              children: [
+                SizedBox(height: 300, child: _dispatch()),
+                const SizedBox(height: 10),
+                SizedBox(height: 400, child: _missionPanel()),
+              ],
+            )
+          : Row(
+              children: [
+                Expanded(child: _dispatch()),
+                const SizedBox(width: 10),
+                Expanded(child: _missionPanel()),
+              ],
+            ),
     4 => _teams(),
     5 => _users(),
     6 => _communications(),

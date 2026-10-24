@@ -1,3 +1,7 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:flutter/rendering.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,24 +22,42 @@ void main() {
         final ops = OperationsStore(transport);
         await ops.ready;
         final live = ValueNotifier(0);
+        final screenshotKey = GlobalKey();
         await tester.pumpWidget(
           MaterialApp(
             theme: ThemeData.dark(),
-            home: CommandCenterScreen(
-              meshUserLocations: const {},
-              meshSosLocations: const {},
-              transport: transport,
-              operations: ops,
-              live: live,
-              batteryLevel: () => 0,
-              onSos: () async {},
-              onCancelSos: () async {},
-              onOfflineMaps: () {},
+            home: RepaintBoundary(
+              key: screenshotKey,
+              child: CommandCenterScreen(
+                meshUserLocations: const {},
+                meshSosLocations: const {},
+                transport: transport,
+                operations: ops,
+                live: live,
+                batteryLevel: () => 0,
+                onSosResponded: (_) {},
+                onSos: () async {},
+                onCancelSos: () async {},
+                onOfflineMaps: () {},
+              ),
             ),
           ),
         );
         await tester.pump(const Duration(milliseconds: 500));
         expect(tester.takeException(), isNull);
+        await tester.runAsync(() async {
+          final boundary =
+              screenshotKey.currentContext!.findRenderObject()
+                  as RenderRepaintBoundary;
+          final image = await boundary.toImage();
+          final data = await image.toByteData(format: ui.ImageByteFormat.png);
+          final file = File(
+            'test-output/command-center-${size.width.toInt()}.png',
+          );
+          await file.parent.create(recursive: true);
+          await file.writeAsBytes(data!.buffer.asUint8List());
+          image.dispose();
+        });
         if (size.width < 1200) {
           await tester.tap(find.byTooltip('Open navigation menu'));
           await tester.pumpAndSettle();

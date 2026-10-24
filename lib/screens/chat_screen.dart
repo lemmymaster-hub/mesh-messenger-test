@@ -154,6 +154,17 @@ class _ChatScreenState extends State<ChatScreen>
       final savedName = await nearbyService.loadDeviceName();
       await nearbyService.loadOrCreateDeviceId();
       await _loadSelectedRole();
+      await _operations.ready;
+      if (!mounted) return;
+      for (final e in _operations.incidents.entries) {
+        if (e.value['status'] != 'resolved') {
+          meshSosLocations[e.key] = Map.of(e.value);
+          if (e.value['senderId'] == nearbyService.deviceId) {
+            activeSosId = e.key;
+            sosActive = true;
+          }
+        }
+      }
       internetAvailable = await nearbyService.hasInternetConnection();
       if (!mounted) return;
 
@@ -208,7 +219,7 @@ class _ChatScreenState extends State<ChatScreen>
               'lat': latitude,
               'lng': longitude,
               'time': timestamp,
-              'battery': batteryLevel ?? 0,
+              'battery': batteryLevel ?? -1,
             };
 
             _changed();
@@ -1472,7 +1483,7 @@ class _ChatScreenState extends State<ChatScreen>
               borderRadius: BorderRadius.circular(10),
             ),
             child: Text(
-              internetAvailable ? '🌐 ONLINE' : '📡 MESH',
+              internetAvailable ? '🌐 LAN/MOBILE' : '📡 MESH',
               style: TextStyle(
                 color: internetAvailable
                     ? Colors.lightBlueAccent
@@ -1926,6 +1937,15 @@ class _ChatScreenState extends State<ChatScreen>
                     transport: nearbyService,
                     operations: _operations,
                     live: _meshLive,
+                    onSosResponded: (id) {
+                      if (incomingSosId == id) {
+                        _stopIncomingSosAlarm();
+                        setState(() {
+                          incomingSosActive = false;
+                          showSosModal = false;
+                        });
+                      }
+                    },
                     onSos: _activateSos,
                     onCancelSos: _cancelSos,
                     onOfflineMaps: () => Navigator.push(

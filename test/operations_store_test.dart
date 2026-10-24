@@ -19,7 +19,9 @@ class TestTransport extends NearbyService {
   }
 
   @override
-  void dispose() {} // No native transport was started.
+  void dispose() {
+    super.dispose();
+  }
 }
 
 MeshMessage event(

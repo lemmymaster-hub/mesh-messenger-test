@@ -2,7 +2,9 @@ name: NRN validation
 on:
   push:
     branches: [main, 'codex/**']
-  pull_request:
+concurrency:
+  group: nrn-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -14,7 +16,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -22,6 +24,11 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze --no-fatal-infos --no-fatal-warnings
       - run: flutter test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NRN-UI-review
+          path: test-output/
       - run: flutter build apk --debug
       - uses: actions/upload-artifact@v4
         with:
