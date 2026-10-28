@@ -17,6 +17,14 @@ The map section has a persistent labeled offline download button and saved-area 
 - Resources (repeaters, vehicles, drones and equipment) are a local manual inventory with optional coordinates. They are not measured radio telemetry or hardware controls. Readiness is local to this center.
 - SOS events without GPS stay in the list. Cancellation is applied to the matching incident. Accepting through the command center also silences the matching chat alarm.
 
+## Offline planning extension (1.3 pilot)
+
+The **AI planer** sidebar item opens local network/air-relay planning, constrained
+team assignment, a draft action plan and manual monitoring. It reads teams and
+incidents from this command centre’s operational ledger. Inputs and review records
+persist locally; no cloud API or language-model download is used.
+See [scope, inputs and limitations](docs/NRN_OFFLINE_PLANNER.md).
+
 ## Validation
 
 GitHub Actions runs dependency resolution, static analysis, regression tests, responsive widget interactions and a debug APK build. UI review PNGs and the debug APK are retained as workflow artifacts. Formatting can be checked with `dart format`.
@@ -25,7 +33,7 @@ GitHub Actions runs dependency resolution, static analysis, regression tests, re
 flutter pub get
 flutter analyze
 flutter test
-flutter build apk --debug
+flutter build apk --debug --flavor nrnPilot
 ```
 
 CI treats analyzer diagnostics as failures, including lint and deprecation notices. Android builds use Java 21 with the repository's AGP 9 / Gradle 9 setup.

@@ -19,6 +19,21 @@ android {
         targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["appLabel"] = "NRN Mesh"
+    }
+
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("nrnPilot") {
+            dimension = "distribution"
+            applicationIdSuffix = ".nrnpilot"
+            manifestPlaceholders["appLabel"] = "NRN Mesh Pilot"
+            ndk { abiFilters += setOf("armeabi-v7a", "arm64-v8a") }
+        }
+    }
+
+    packaging {
+        jniLibs { excludes += setOf("**/x86_64/**", "**/x86/**") }
     }
 
     signingConfigs {
