@@ -16,7 +16,7 @@ class MeshMessengerApp extends StatelessWidget {
  @override
 Widget build(BuildContext context) {
   return MaterialApp(
-    title: 'Mesh Messenger Test',
+    title: 'NRN Mesh',
     debugShowCheckedModeBanner: false,
     theme: ThemeData.dark(useMaterial3: true),
     home: const ChatScreen(),

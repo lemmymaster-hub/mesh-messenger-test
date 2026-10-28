@@ -27,9 +27,45 @@ void main() {
     expect(await PlannerStore().load(), state);
   });
 
+  testWidgets('Commander can generate an offline draft from the input screen', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(
+      MaterialApp(home: OfflinePlannerScreen(meshInput: demoScenario())),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Izradi offline prijedlog'),
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Izradi offline prijedlog'));
+    await tester.runAsync(() async {
+      for (var i = 0; i < 100; i++) {
+        if ((await PlannerStore().load())?['plan'] != null) break;
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    });
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('NACRT — čeka pregled komandira'),
+      findsOneWidget,
+    );
+    final saved = await PlannerStore().load();
+    expect(saved!['plan']['network']['status'], 'estimated');
+    expect(saved['approval'], isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('Commander approval persists and changed inputs invalidate it', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final input = demoScenario();
     final plan = PlannerEngine().plan(input);
     SharedPreferences.setMockInitialValues({
@@ -55,7 +91,12 @@ void main() {
     expect(saved!['approval']['commander'], 'Test komandir');
     await tester.tap(find.text('Unos'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Uredi akciju i pragove'));
+    await tester.scrollUntilVisible(
+      find.text('Uredi akciju i pragove'),
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Uredi akciju i pragove'));
     await tester.pumpAndSettle();
     await tester.enterText(

@@ -108,10 +108,11 @@ class _OfflinePlannerScreenState extends State<OfflinePlannerScreen> {
       // Freeze before await so the stored approval and input always agree.
       final state = PlannerEngine.object(jsonDecode(jsonEncode(_state())));
       await _store.save(state);
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Sačuvano lokalno na ovom uređaju.')),
         );
+      }
     } catch (e) {
       if (mounted) setState(() => _error = 'Čuvanje nije uspjelo: $e');
     } finally {
@@ -253,11 +254,13 @@ class _OfflinePlannerScreenState extends State<OfflinePlannerScreen> {
                               if (working[key] is num || working[key] == null) {
                                 if (text.isEmpty &&
                                     (working[key] == null ||
-                                        key == 'elevationM'))
+                                        key == 'elevationM')) {
                                   return null;
+                                }
                                 if (num.tryParse(text) == null ||
-                                    !num.parse(text).isFinite)
+                                    !num.parse(text).isFinite) {
                                   return 'Unesite konačan broj.';
+                                }
                               } else if (text.isEmpty) {
                                 return 'Obavezno polje.';
                               }
@@ -500,8 +503,9 @@ class _OfflinePlannerScreenState extends State<OfflinePlannerScreen> {
           ),
           FilledButton(
             onPressed: () {
-              if (_commander.text.trim().isNotEmpty)
+              if (_commander.text.trim().isNotEmpty) {
                 Navigator.pop(context, true);
+              }
             },
             child: const Text('Odobri prijedlog'),
           ),
@@ -609,6 +613,7 @@ class _OfflinePlannerScreenState extends State<OfflinePlannerScreen> {
       Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(value));
 
   Widget _inputs() => ListView(
+    key: const ValueKey('planner-input'),
     padding: const EdgeInsets.all(12),
     children: [
       _card('Unos komandira — radi bez interneta', [
@@ -662,8 +667,9 @@ class _OfflinePlannerScreenState extends State<OfflinePlannerScreen> {
                             : decoded;
                         await _replace(value);
                       } catch (e) {
-                        if (mounted)
+                        if (mounted) {
                           setState(() => _error = 'Uvoz nije uspio: $e');
+                        }
                       }
                     },
               child: const Text('Uvezi JSON iz međuspremnika'),
@@ -706,12 +712,14 @@ class _OfflinePlannerScreenState extends State<OfflinePlannerScreen> {
   );
 
   Widget _results() {
-    if (_plan == null)
+    if (_plan == null) {
       return const Center(child: Text('Unesite podatke i izradite prijedlog.'));
+    }
     final network = PlannerEngine.object(_plan!['network']);
     final air = PlannerEngine.object(_plan!['airRelay']);
     final path = (network['path'] as List).cast<Json>();
     return ListView(
+      key: ValueKey('planner-result-${_plan!['createdAt']}'),
       padding: const EdgeInsets.all(12),
       children: [
         _card('Verzija plana', [
@@ -805,6 +813,7 @@ class _OfflinePlannerScreenState extends State<OfflinePlannerScreen> {
       /* A changed/invalid input is explicitly displayed below. */
     }
     return ListView(
+      key: ValueKey('planner-monitor-${_plan!['createdAt']}'),
       padding: const EdgeInsets.all(12),
       children: [
         _card('5. Praćenje izvođenja', [
@@ -905,10 +914,11 @@ class _OfflinePlannerScreenState extends State<OfflinePlannerScreen> {
             await Clipboard.setData(
               ClipboardData(text: _pretty.convert(_state())),
             );
-            if (context.mounted)
+            if (context.mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Unos, plan i dnevnik kopirani.')),
               );
+            }
           },
         ),
         IconButton(

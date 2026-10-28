@@ -17,8 +17,9 @@ class PlannerEngine {
   }
 
   static Json object(dynamic v) {
-    if (v is! Map<String, dynamic>)
+    if (v is! Map<String, dynamic>) {
       throw const FormatException('Očekivan objekat.');
+    }
     return v;
   }
 
@@ -70,8 +71,9 @@ class PlannerEngine {
   }
 
   void validate(Json s) {
-    if (s['schemaVersion'] != 1)
+    if (s['schemaVersion'] != 1) {
       throw const FormatException('Nepodržana verzija.');
+    }
     text(s, 'mission');
     final hq = object(s['hq']);
     final incident = object(s['incident']);
@@ -90,8 +92,9 @@ class PlannerEngine {
       number(n, 'antennaM', min: 0, max: 1000);
     }
     for (final n in [...sites, ...air]) {
-      if (n['accessible'] is! bool)
+      if (n['accessible'] is! bool) {
         throw const FormatException('Nedostaje accessible.');
+      }
     }
     number(s, 'stationLimit', min: 0, max: 20);
     if (s['stationLimit'] != (s['stationLimit'] as num).round()) {
@@ -139,29 +142,33 @@ class PlannerEngine {
     for (final list in [teams, tasks]) {
       final seen = <String>{};
       for (final item in list) {
-        if (!seen.add(text(item, 'id')))
+        if (!seen.add(text(item, 'id'))) {
           throw const FormatException('Dupli ID tima/zadatka.');
+        }
         text(item, 'name');
         point(item);
       }
     }
     for (final team in teams) {
       _strings(team['skills']);
-      if (team['available'] is! bool)
+      if (team['available'] is! bool) {
         throw const FormatException('Nedostaje available.');
+      }
     }
     for (final task in tasks) {
       _strings(task['requires']);
       number(task, 'priority', min: 1, max: 5);
-      if (task['routeConfirmed'] is! bool)
+      if (task['routeConfirmed'] is! bool) {
         throw const FormatException('Nedostaje routeConfirmed.');
+      }
     }
     final drone = object(s['drone']);
     number(drone, 'minAglM', min: 1, max: 1000);
     number(drone, 'maxAglM', min: 1, max: 1000);
     number(drone, 'stepM', min: 1, max: 1000);
-    if (drone['minAglM'] > drone['maxAglM'])
+    if (drone['minAglM'] > drone['maxAglM']) {
       throw const FormatException('Neispravan raspon AGL.');
+    }
     if ((drone['maxAglM'] - drone['minAglM']) / drone['stepM'] > 100) {
       throw const FormatException(
         'Najviše 101 kandidat visine. Povećajte stepM.',
@@ -171,8 +178,9 @@ class PlannerEngine {
     number(drone, 'transitMinutes', min: 0, max: 1440);
     number(drone, 'reserveMinutes', min: 0, max: 1440);
     number(drone, 'requiredMinutes', min: 1, max: 1440);
-    if (drone['conditionsConfirmed'] is! bool)
+    if (drone['conditionsConfirmed'] is! bool) {
       throw const FormatException('Nedostaje conditionsConfirmed.');
+    }
     number(s, 'reportTimeoutMinutes', min: 1, max: 1440);
     number(s, 'batteryAlertPercent', min: 1, max: 100);
   }
@@ -326,8 +334,9 @@ class PlannerEngine {
       agl += number(drone, 'stepM')
     ) {
       if (drone['conditionsConfirmed'] != true ||
-          usableMinutes < number(drone, 'requiredMinutes'))
+          usableMinutes < number(drone, 'requiredMinutes')) {
         break;
+      }
       for (final site in objects(
         s['airSites'],
       ).where((n) => n['accessible'] == true)) {
@@ -350,18 +359,21 @@ class PlannerEngine {
             'amslM': number(site, 'elevationM') + agl,
             'availableMinutes': usableMinutes,
             'path': airPath,
-            'reason': 'Najniža ispitana AGL visina među unesenim kandidatima; nije nalog za let.',
+            'reason':
+                'Najniža ispitana AGL visina među unesenim kandidatima; nije nalog za let.',
           };
           break;
         }
       }
       if (airPlan['status'] == 'estimated') break;
     }
-    if (path != null)
+    if (path != null) {
       airPlan = {
         'status': 'notRequired',
-        'reason': 'Zemaljska putanja prolazi model; vazdušni relej nije potreban za ovu vezu.',
+        'reason':
+            'Zemaljska putanja prolazi model; vazdušni relej nije potreban za ovu vezu.',
       };
+    }
     if (path == null && drone['conditionsConfirmed'] != true) {
       airPlan['reason'] = 'Komandir nije potvrdio uslove i ograničenja leta.';
     } else if (path == null &&
@@ -438,9 +450,11 @@ class PlannerEngine {
         for (var j = 0; j < available.length; j++) {
           final team = available[j];
           if (mask & (1 << j) != 0 ||
-              !_strings(task['requires'])
-                  .every(_strings(team['skills']).contains))
+              !_strings(
+                task['requires'],
+              ).every(_strings(team['skills']).contains)) {
             continue;
+          }
           final tail = solve(i + 1, mask | (1 << j));
           final d = distance(team, task);
           final score = tail.score + number(task, 'priority');
@@ -495,11 +509,12 @@ class PlannerEngine {
       final r = matching.first;
       final at = DateTime.parse(r['at']);
       final minutes = now.difference(at).inSeconds / 60;
-      if (minutes < -1)
+      if (minutes < -1) {
         alerts.add({
           'teamId': id,
           'message': 'Vrijeme izvještaja je u budućnosti; provjeriti sat.',
         });
+      }
       if (minutes > number(scenario, 'reportTimeoutMinutes')) {
         alerts.add({
           'teamId': id,

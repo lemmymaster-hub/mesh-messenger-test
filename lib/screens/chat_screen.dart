@@ -638,9 +638,7 @@ class _ChatScreenState extends State<ChatScreen>
         _setPinnedSosCard(
           status: 'active',
           title: '🆘 AKTIVAN SOS',
-          message:
-              'SOS POSLAT\n'
-              locationDescription,
+          message: 'SOS POSLAT\n$locationDescription',
           sender: nearbyService.deviceName,
         );
         _messages.insert(
@@ -1818,7 +1816,7 @@ class _ChatScreenState extends State<ChatScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'BSL Mesh Chat',
+              'NRN Mesh',
               style: TextStyle(color: Colors.white, fontSize: 18),
             ),
             Text(

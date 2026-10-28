@@ -19,6 +19,16 @@ android {
         targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["appLabel"] = "BSL Mesh Lite"
+    }
+
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("nrnPilot") {
+            dimension = "distribution"
+            applicationIdSuffix = ".nrnpilot"
+            manifestPlaceholders["appLabel"] = "NRN Mesh Pilot"
+        }
     }
 
     buildTypes {

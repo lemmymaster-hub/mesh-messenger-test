@@ -120,10 +120,25 @@ flutter test test/offline_planner/planner_test.dart
 flutter analyze lib/modules/offline_planner
 ```
 
-In this development session the 14 pure-Dart checks and targeted Dart analysis
-passed. Full Flutter execution was blocked by automatic review because tool
-initialization attempted cloud instance metadata access; widget tests and an
-APK build are **not verified**. No attempt was made to bypass that restriction.
+The 14 pure-Dart checks and the Flutter suite (including storage round-trip and
+commander approval invalidation at a 390×844 phone viewport) pass. Flutter's
+standard CI mode is used for builds, which skips cloud instance autodetection.
+
+## Android pilot build
+
+Version 1.1.0+101 uses the `nrnPilot` Android flavor, display name **NRN Mesh Pilot**,
+and application ID `com.example.mesh_messenger_test.nrnpilot`. It installs alongside
+the previous BSL Mesh Lite app instead of requiring its removal or old signing key.
+Old app data is not migrated automatically. This is a development-signed pilot
+build, not a production signing configuration.
+
+```sh
+flutter build apk --release --flavor nrnPilot --target-platform android-arm,android-arm64
+```
+
+On the phone: open the dashboard/command-centre icon in chat, then **AI**. Use
+**DEMO vježba** for synthetic evaluation, or enter and verify real mission inputs.
+Functional field validation and hardware integrations remain outside this build.
 
 ## Next engineering work
 
