@@ -1,5 +1,13 @@
 # BSL Mesh Lite
 
+## NRN offline command planning (first integration)
+
+Command centre → **AI** opens an offline rules-and-calculation planner for network
+routes, aerial relay candidates, team assignments, a draft action plan and manual
+execution monitoring. It includes local persistence and commander review.
+This is not a bundled LLM or a field-validated autonomous command system.
+See [scope, input guide, tests and limitations](docs/NRN_OFFLINE_PLANNER.md).
+
 BSL Mesh Lite is an offline communication platform built with Flutter that enables messaging between mobile devices without internet access.
 
 The system is designed for emergency response teams, search and rescue operations, disaster situations, outdoor events, humanitarian missions, and remote environments where traditional communication infrastructure is unavailable.

@@ -6,6 +6,8 @@ import '../widgets/teams_panel.dart';
 import '../widgets/dispatch_panel.dart';
 import '../widgets/photo_wall_panel.dart';
 import '../models/active_team.dart';
+import '../../offline_planner/planner_screen.dart';
+import '../../offline_planner/planner_scenario.dart';
 
 class CommandCenterScreen extends StatefulWidget {
   final Map<String, Map<String, dynamic>> meshUserLocations;
@@ -24,6 +26,36 @@ class CommandCenterScreen extends StatefulWidget {
 }
 
 class _CommandCenterScreenState extends State<CommandCenterScreen> {
+  void _openOfflinePlanner() {
+    final input = emptyScenario();
+    final local = widget.meshUserLocations.values.where((p) => p['isLocal'] == true);
+    if (local.isNotEmpty) {
+      input['hq']['lat'] = local.first['lat'];
+      input['hq']['lng'] = local.first['lng'];
+      input['hq']['sourceTime'] = local.first['time'];
+    }
+    final incidents = widget.meshSosLocations.values
+        .where((p) => p['status'] != 'resolved').toList();
+    if (incidents.length == 1) {
+      input['incident']['lat'] = incidents.first['lat'];
+      input['incident']['lng'] = incidents.first['lng'];
+      input['incident']['sourceTime'] = incidents.first['time'];
+    }
+    input['importNote'] = 'Snimak podataka iz štaba. Potvrdite lokacije i starost. '
+        'Ako postoji više SOS prijava, lokacija incidenta nije automatski odabrana. '
+        'Položaj člana nije potvrđen položaj cijelog tima; sposobnosti i dostupnost unesite ručno.';
+    input['teams'] = activeTeams.map((team) {
+      final locations = team.members.map((id) => widget.meshUserLocations[id])
+          .whereType<Map<String, dynamic>>().toList();
+      return <String, dynamic>{'id': team.id, 'name': team.name,
+        'lat': locations.isEmpty ? null : locations.first['lat'],
+        'lng': locations.isEmpty ? null : locations.first['lng'],
+        'skills': <String>[], 'available': false,
+        'sourceTime': locations.isEmpty ? null : locations.first['time']};
+    }).toList();
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => OfflinePlannerScreen(meshInput: input)));
+  }
   bool isCreatingTeam = false;
   String pendingTeamName = '';
   String pendingTeamTask = '';
@@ -847,7 +879,7 @@ Color _myBatteryColor() {
             icon: Icons.psychology,
             label: 'AI',
             color: Colors.purpleAccent,
-            onTap: () {},
+            onTap: _openOfflinePlanner,
           ),
           _mobileDockButton(
             icon: Icons.more_horiz,
@@ -958,6 +990,11 @@ Color _myBatteryColor() {
 
     return Scaffold(
       backgroundColor: const Color(0xFF06111F),
+      floatingActionButton: isWide ? FloatingActionButton.extended(
+        onPressed: _openOfflinePlanner,
+        icon: const Icon(Icons.psychology),
+        label: const Text('Offline planer'),
+      ) : null,
       body: SafeArea(child: isWide ? _wideLayout() : _mobileLayout()),
     );
   }
