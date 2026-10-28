@@ -9,6 +9,8 @@ import 'package:uuid/uuid.dart';
 import '../../../services/nearby_service.dart';
 import '../services/operations_store.dart';
 import '../widgets/command_center_map_panel.dart';
+import '../../offline_planner/planner_screen.dart';
+import '../../offline_planner/planner_scenario.dart';
 
 class CommandCenterScreen extends StatefulWidget {
   const CommandCenterScreen({
@@ -37,6 +39,53 @@ class CommandCenterScreen extends StatefulWidget {
 }
 
 class _CommandCenterScreenState extends State<CommandCenterScreen> {
+  Future<void> _openOfflinePlanner() async {
+    await ops.ready;
+    if (!mounted) return;
+    final input = emptyScenario();
+    final local = widget.meshUserLocations[mesh.deviceId];
+    if (local != null) {
+      input['hq']['lat'] = local['lat'];
+      input['hq']['lng'] = local['lng'];
+      input['hq']['sourceTime'] = local['time'];
+    }
+    final incidents = ops.incidents.values
+        .where((e) => e['status'] != 'resolved')
+        .toList();
+    if (incidents.length == 1) {
+      input['incident']['lat'] = incidents.first['lat'];
+      input['incident']['lng'] = incidents.first['lng'];
+      input['incident']['sourceTime'] = incidents.first['time'];
+    }
+    input['teams'] = ops.teams.values.map((team) {
+      final members = (team['members'] as List? ?? []).whereType<String>();
+      final positions = members
+          .map((id) => widget.meshUserLocations[id])
+          .whereType<Map<String, dynamic>>()
+          .toList();
+      return <String, dynamic>{
+        'id': team['id'],
+        'name': team['name'],
+        'lat': positions.isEmpty ? null : positions.first['lat'],
+        'lng': positions.isEmpty ? null : positions.first['lng'],
+        'sourceTime': positions.isEmpty ? null : positions.first['time'],
+        'skills': <String>[],
+        'available': false,
+      };
+    }).toList();
+    input['importNote'] =
+        'Snimak operativnog dnevnika NRN komandnog centra. '
+        'Potvrdite položaj štaba, incidenta i timova i starost izvještaja. '
+        'Sposobnosti, dostupnost, radio-opremu i profile terena unesite ručno. '
+        'Ako ima više SOS prijava, odaberite incident ručnim unosom. '
+        'Otvaranje planera ne mijenja postojeće zadatke i ne šalje naredbe.';
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => OfflinePlannerScreen(meshInput: input),
+      ),
+    );
+  }
+
   static const bg = Color(0xFF070D14),
       panel = Color(0xFF0C1620),
       line = Color(0xFF23313D),
@@ -325,6 +374,13 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
             setState(() => _page = i);
           },
         ),
+      ListTile(
+        key: const ValueKey('open-offline-planner'),
+        dense: true,
+        leading: const Icon(Icons.psychology_outlined, size: 18),
+        title: const Text('AI planer', style: TextStyle(fontSize: 11)),
+        onTap: _openOfflinePlanner,
+      ),
       const Padding(
         padding: EdgeInsets.all(16),
         child: Text(
@@ -1010,7 +1066,9 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
                   child: TextField(
                     controller: _message,
                     readOnly: MediaQuery.sizeOf(context).shortestSide < 600,
-                    onTap: MediaQuery.sizeOf(context).shortestSide < 600 ? _composeMessage : null,
+                    onTap: MediaQuery.sizeOf(context).shortestSide < 600
+                        ? _composeMessage
+                        : null,
                     maxLength: 2000,
                     style: TextStyle(fontSize: _isPhone ? 16 : 14),
                     decoration: const InputDecoration(
@@ -1037,29 +1095,49 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
   }
 
   Future<void> _composeMessage() async {
-    await _safeDialog<void>(context: context, builder: (dialogContext) => AlertDialog(
-      scrollable: true,
-      title: Text(_recipient == null ? 'Broadcast poruka' : 'Poruka: ${_name(_recipient!)}'),
-      content: TextField(
-        controller: _message, autofocus: true, maxLength: 2000,
-        minLines: 1, maxLines: 4,
-        decoration: const InputDecoration(hintText: 'Napiši poruku…'),
+    await _safeDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        scrollable: true,
+        title: Text(
+          _recipient == null
+              ? 'Broadcast poruka'
+              : 'Poruka: ${_name(_recipient!)}',
+        ),
+        content: TextField(
+          controller: _message,
+          autofocus: true,
+          maxLength: 2000,
+          minLines: 1,
+          maxLines: 4,
+          decoration: const InputDecoration(hintText: 'Napiši poruku…'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Nazad'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _sendCommunication();
+            },
+            child: const Text('Pošalji'),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Nazad')),
-        FilledButton(onPressed: () {
-          Navigator.pop(dialogContext);
-          _sendCommunication();
-        }, child: const Text('Pošalji')),
-      ],
-    ));
+    );
   }
 
   Future<void> _sendCommunication() => _run(() async {
     final text = _message.text.trim();
-    if (text.isEmpty) { return 'Upiši poruku'; }
+    if (text.isEmpty) {
+      return 'Upiši poruku';
+    }
     final result = await ops.communicate(text, _recipient);
-    if (!result.startsWith('Nije')) { _message.clear(); }
+    if (!result.startsWith('Nije')) {
+      _message.clear();
+    }
     return result;
   });
 
@@ -2097,30 +2175,32 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
     backgroundColor: bg,
     resizeToAvoidBottomInset: false,
     body: SafeArea(
-      child: LayoutBuilder(builder: (context, viewport) {
-        // Keep the entire operational overview visible on landscape phones.
-        const canvas = Size(1600, 900);
-        return Center(
-          child: FittedBox(
-            key: const ValueKey('command-center-overview'),
-            fit: BoxFit.contain,
-            child: SizedBox(
-              width: canvas.width,
-              height: canvas.height,
-              child: MediaQuery(
-                data: MediaQuery.of(context).copyWith(
-                  size: canvas,
-                  padding: EdgeInsets.zero,
-                  viewPadding: EdgeInsets.zero,
-                  viewInsets: EdgeInsets.zero,
-                  textScaler: TextScaler.noScaling,
+      child: LayoutBuilder(
+        builder: (context, viewport) {
+          // Keep the entire operational overview visible on landscape phones.
+          const canvas = Size(1600, 900);
+          return Center(
+            child: FittedBox(
+              key: const ValueKey('command-center-overview'),
+              fit: BoxFit.contain,
+              child: SizedBox(
+                width: canvas.width,
+                height: canvas.height,
+                child: MediaQuery(
+                  data: MediaQuery.of(context).copyWith(
+                    size: canvas,
+                    padding: EdgeInsets.zero,
+                    viewPadding: EdgeInsets.zero,
+                    viewInsets: EdgeInsets.zero,
+                    textScaler: TextScaler.noScaling,
+                  ),
+                  child: _buildConsole(context),
                 ),
-                child: _buildConsole(context),
               ),
             ),
-          ),
-        );
-      }),
+          );
+        },
+      ),
     ),
   );
 
@@ -2227,6 +2307,14 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
             Navigator.pop(drawerContext);
           },
         ),
+      ListTile(
+        leading: const Icon(Icons.psychology_outlined),
+        title: const Text('AI planer'),
+        onTap: () {
+          Navigator.pop(drawerContext);
+          _openOfflinePlanner();
+        },
+      ),
     ],
   );
   @override
