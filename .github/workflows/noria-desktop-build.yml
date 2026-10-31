@@ -1,0 +1,47 @@
+name: NRN Desktop compatibility APK
+on:
+  push:
+    branches: [build/noria-desktop-20261031]
+concurrency:
+  group: nrn-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Reuse test APK signing key
+        uses: actions/cache@v5
+        with:
+          path: android/.nrn-signing/debug.keystore
+          key: nrn-android-test-signing-v2
+      - name: Ensure test APK signing key exists
+        run: |
+          mkdir -p android/.nrn-signing
+          if [ ! -f android/.nrn-signing/debug.keystore ]; then
+            keytool -genkeypair -keystore android/.nrn-signing/debug.keystore -storepass android -keypass android -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
+          fi
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NRN-UI-review
+          path: test-output/
+      - run: flutter build apk --debug --flavor nrnPilot --target-platform android-arm,android-arm64,android-x64 --build-number 2026103101
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NRN-Mesh-debug
+          path: build/app/outputs/flutter-apk/app-nrnpilot-debug.apk
