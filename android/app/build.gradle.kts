@@ -28,13 +28,10 @@ android {
             dimension = "distribution"
             applicationIdSuffix = ".nrnpilot"
             manifestPlaceholders["appLabel"] = "NRN Mesh Pilot"
-            ndk { abiFilters += setOf("armeabi-v7a", "arm64-v8a") }
+            ndk { abiFilters += setOf("armeabi-v7a", "arm64-v8a", "x86_64") }
         }
     }
 
-    packaging {
-        jniLibs { excludes += setOf("**/x86_64/**", "**/x86/**") }
-    }
 
     signingConfigs {
         getByName("debug") {
