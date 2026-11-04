@@ -62,6 +62,7 @@ class _ChatScreenState extends State<ChatScreen>
   String? selectedPrivateDeviceName;
   bool sosActive = false;
   bool incomingSosActive = false;
+  bool _sosModalDismissed = false;
   bool sosAlarmActive = false;
   bool _changingSos = false;
   bool _respondingToSos = false;
@@ -429,6 +430,7 @@ class _ChatScreenState extends State<ChatScreen>
             entry.value['sender']?.toString() ?? 'Nepoznat uređaj';
         incomingSosMessage = entry.value['message']?.toString() ?? '';
         incomingSosActive = true;
+        _sosModalDismissed = false;
       });
       return true;
     }
@@ -764,14 +766,9 @@ class _ChatScreenState extends State<ChatScreen>
     _locationBroadcastInProgress = true;
 
     try {
-      LocationPermission permission = await Geolocator.checkPermission();
-
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
+      final permission = await Geolocator.checkPermission();
+      if (permission != LocationPermission.whileInUse &&
+          permission != LocationPermission.always) {
         return;
       }
 
@@ -782,8 +779,10 @@ class _ChatScreenState extends State<ChatScreen>
         ),
       );
 
+      if (!mounted) return;
       _latestPosition = position;
       await _loadBatteryLevel();
+      if (!mounted) return;
 
       await nearbyService.sendLocationUpdate(
         latitude: position.latitude,
@@ -1140,7 +1139,7 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _sosModal() {
-    if (!incomingSosActive) {
+    if (!incomingSosActive || _sosModalDismissed) {
       return const SizedBox.shrink();
     }
 
@@ -1216,6 +1215,10 @@ class _ChatScreenState extends State<ChatScreen>
                       ),
                     ),
                   ],
+                ),
+                TextButton(
+                  onPressed: () => setState(() => _sosModalDismissed = true),
+                  child: const Text('Odgovori kasnije'),
                 ),
               ],
             ),
@@ -1714,9 +1717,7 @@ class _ChatScreenState extends State<ChatScreen>
                 controller: _controller,
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
-                  hintText: incomingSosActive
-                      ? 'Prvo reaguj na SOS poruku...'
-                      : selectedPrivateDeviceName == null
+                  hintText: selectedPrivateDeviceName == null
                       ? 'Unesi mesh poruku...'
                       : 'Privatna poruka za $selectedPrivateDeviceName...',
                   hintStyle: TextStyle(
@@ -1733,11 +1734,7 @@ class _ChatScreenState extends State<ChatScreen>
                     vertical: 12,
                   ),
                 ),
-                onSubmitted: (_) {
-                  if (!incomingSosActive) {
-                    _sendMessage();
-                  }
-                },
+                onSubmitted: (_) => _sendMessage(),
               ),
             ),
             const SizedBox(width: 8),
@@ -1745,7 +1742,7 @@ class _ChatScreenState extends State<ChatScreen>
               backgroundColor: const Color(0xFF2563EB),
               child: IconButton(
                 icon: const Icon(Icons.send, color: Colors.white),
-                onPressed: incomingSosActive ? null : _sendMessage,
+                onPressed: _sendMessage,
               ),
             ),
           ],
@@ -2185,8 +2182,15 @@ class _ChatScreenState extends State<ChatScreen>
                   ),
                 ),
 
-              if (phone && selectedPrivateDeviceName != null)
-                Expanded(child: _privateChatPanel(fill: true))
+              if (phone && selectedPrivateDeviceName != null) ...[
+                if (incomingSosActive && _sosModalDismissed)
+                  TextButton.icon(
+                    onPressed: () => setState(() => _sosModalDismissed = false),
+                    icon: const Icon(Icons.sos, color: Colors.redAccent),
+                    label: const Text('Otvori SOS poziv'),
+                  ),
+                Expanded(child: _privateChatPanel(fill: true)),
+              ]
               else
                 _chatArea(),
 
