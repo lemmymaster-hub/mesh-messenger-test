@@ -561,7 +561,6 @@ class _OfflinePlannerScreenState extends State<OfflinePlannerScreen> {
       _editor.text = _pretty.convert(value);
       _plan = null;
       _approval = null;
-      _reports = [];
       _teamId = null;
       _error = null;
       _tab = 0;

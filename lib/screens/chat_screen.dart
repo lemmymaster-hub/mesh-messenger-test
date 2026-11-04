@@ -60,7 +60,6 @@ class _ChatScreenState extends State<ChatScreen>
 
   String? selectedPrivateDeviceId;
   String? selectedPrivateDeviceName;
-  bool showSosModal = false;
   bool sosActive = false;
   bool incomingSosActive = false;
   bool sosAlarmActive = false;
@@ -197,8 +196,9 @@ class _ChatScreenState extends State<ChatScreen>
         if (_selectNextIncomingSos()) _startIncomingSosAlarm();
         if (savedName != null) await _startMesh();
       } catch (error) {
-        if (mounted)
+        if (mounted) {
           setState(() => _addSystemMessage('Pokretanje nije uspjelo: $error'));
+        }
       }
     });
 
@@ -429,14 +429,12 @@ class _ChatScreenState extends State<ChatScreen>
             entry.value['sender']?.toString() ?? 'Nepoznat uređaj';
         incomingSosMessage = entry.value['message']?.toString() ?? '';
         incomingSosActive = true;
-        showSosModal = true;
       });
       return true;
     }
     setState(() {
       incomingSosId = null;
       incomingSosActive = false;
-      showSosModal = false;
     });
     return false;
   }
@@ -538,8 +536,9 @@ class _ChatScreenState extends State<ChatScreen>
     try {
       final permission = await Geolocator.checkPermission();
       if (permission != LocationPermission.whileInUse &&
-          permission != LocationPermission.always)
+          permission != LocationPermission.always) {
         return null;
+      }
       if (recent(_latestPosition)) return _latestPosition;
       final cached = await Geolocator.getLastKnownPosition().timeout(
         const Duration(seconds: 1),
@@ -701,7 +700,7 @@ class _ChatScreenState extends State<ChatScreen>
         return;
       }
       setState(() {
-        if (!privateMode)
+        if (!privateMode) {
           _messages.add(
             ChatMessage(
               text: text,
@@ -710,6 +709,7 @@ class _ChatScreenState extends State<ChatScreen>
               senderName: 'Ja',
             ),
           );
+        }
         _logs.insert(
           0,
           'Poruka predata direktnim vezama: ${result.submittedCount}/${result.attemptedCount}; prijem nije potvrđen.',
@@ -1140,7 +1140,7 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _sosModal() {
-    if (!showSosModal) {
+    if (!incomingSosActive) {
       return const SizedBox.shrink();
     }
 
@@ -1182,10 +1182,14 @@ class _ChatScreenState extends State<ChatScreen>
 
                 const SizedBox(height: 12),
 
-                Text(
-                  incomingSosMessage,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Text(
+                      incomingSosMessage,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  ),
                 ),
 
                 const SizedBox(height: 20),
@@ -1207,13 +1211,7 @@ class _ChatScreenState extends State<ChatScreen>
 
                     Expanded(
                       child: ElevatedButton(
-                        onPressed: () {
-                          setState(() {
-                            showSosModal = false;
-                          });
-
-                          _showRejectSosDialog();
-                        },
+                        onPressed: _showRejectSosDialog,
                         child: const Text('ODBIJ'),
                       ),
                     ),
@@ -1806,8 +1804,7 @@ class _ChatScreenState extends State<ChatScreen>
             ),
           ),
         ),
-      ),
-    );
+      );
     } finally {
       await SystemChrome.setPreferredOrientations([
         DeviceOrientation.portraitUp,

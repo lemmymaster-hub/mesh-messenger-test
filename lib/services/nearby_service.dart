@@ -390,8 +390,9 @@ class NearbyService extends ChangeNotifier {
   void _handleIncomingPayload(String endpointId, Uint8List bytes) {
     if (_disposed ||
         _stopping != null ||
-        !connectedDevices.containsKey(endpointId))
+        !connectedDevices.containsKey(endpointId)) {
       return;
+    }
     onLog?.call('PAYLOAD primljen od $endpointId | bytes: ${bytes.length}');
 
     if (bytes.length > _maxIncomingBytes) {

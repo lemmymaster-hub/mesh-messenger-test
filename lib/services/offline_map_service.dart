@@ -21,8 +21,9 @@ class OfflineMapService {
     if (uri == null ||
         uri.scheme != 'https' ||
         uri.host.isEmpty ||
-        uri.userInfo.isNotEmpty)
+        uri.userInfo.isNotEmpty) {
       return false;
+    }
     final host = uri.host.toLowerCase().replaceFirst(RegExp(r'\.+$'), '');
     return host != 'openstreetmap.org' && !host.endsWith('.openstreetmap.org');
   }

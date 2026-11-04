@@ -2,6 +2,8 @@ name: NRN validation
 on:
   push:
     branches: [main, 'codex/**']
+  pull_request:
+    branches: [build/noria-desktop-20261031]
 concurrency:
   group: nrn-${{ github.ref }}
   cancel-in-progress: true
@@ -40,7 +42,7 @@ jobs:
         with:
           name: NRN-UI-review
           path: test-output/
-      - run: flutter build apk --debug --flavor nrnPilot
+      - run: flutter build apk --debug --flavor nrnPilot --target-platform android-arm,android-arm64,android-x64
       - uses: actions/upload-artifact@v4
         with:
           name: NRN-Mesh-debug
