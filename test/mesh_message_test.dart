@@ -81,5 +81,20 @@ void main() {
         throwsFormatException,
       );
     });
+    test('odbacuje neispravan hop, vrijeme i neadresiranu privatnu poruku', () {
+      final base = {'messageId': 'message', 'senderId': 'device'};
+      for (final fields in [
+        {'hopCount': 1.8},
+        {'timestamp': 8640000000000001},
+        {'type': 'private', 'receiverId': 'ALL'},
+        {'type': 'sos_cancel', 'sosId': ' '},
+        {'latitude': 'NaN', 'longitude': 'NaN'},
+      ]) {
+        expect(
+          () => MeshMessage.fromJson({...base, ...fields}),
+          throwsFormatException,
+        );
+      }
+    });
   });
 }

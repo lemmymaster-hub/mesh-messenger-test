@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -21,26 +21,35 @@ class MeshSendResult {
   const MeshSendResult({
     required this.messageId,
     required this.attemptedCount,
-    required this.deliveredCount,
+    required this.submittedEndpointIds,
   });
 
   final String messageId;
   final int attemptedCount;
-  final int deliveredCount;
+  final List<String> submittedEndpointIds;
+  int get submittedCount => submittedEndpointIds.length;
 
-  int get failedCount => attemptedCount - deliveredCount;
-  bool get delivered => deliveredCount > 0;
+  int get failedCount => attemptedCount - submittedCount;
+  bool get submitted => submittedCount > 0;
 }
 
 class NearbyService extends ChangeNotifier {
   final _events = StreamController<MeshMessage>.broadcast(sync: true);
   Stream<MeshMessage> get messages => _events.stream;
   void _devicesChanged() {
+    if (_disposed) return;
     onDevicesChanged?.call();
     notifyListeners();
   }
 
   final Set<String> _connecting = {};
+  bool _disposed = false;
+  int _session = 0;
+  bool _startingAdvertising = false;
+  bool _startingDiscovery = false;
+  Future<void>? _stopping;
+  Future<void>? _identityLoad;
+  static const _transport = MethodChannel('ba.noria.nrnmesh/transport');
   bool advertising = false;
   bool discovering = false;
   final uuid = const Uuid();
@@ -83,6 +92,13 @@ class NearbyService extends ChangeNotifier {
     return value.length >= 8 ? value.substring(0, 8) : value;
   }
 
+  Future<void> _submitBytes(String endpointId, Uint8List bytes) => _transport
+      .invokeMethod<void>('submitBytes', {
+        'endpointId': endpointId,
+        'bytes': bytes,
+      })
+      .timeout(const Duration(seconds: 5));
+
   Future<MeshSendResult> _sendToConnectedPeers(
     MeshMessage message, {
     String? excludeEndpointId,
@@ -95,24 +111,25 @@ class NearbyService extends ChangeNotifier {
     if (payload.length > _maxIncomingBytes) {
       throw const FormatException('Poruka prelazi 32 KB.');
     }
-    var deliveredCount = 0;
-
-    for (final endpointId in endpointIds) {
-      try {
-        await Nearby().sendBytesPayload(endpointId, payload);
-        deliveredCount++;
-        onLog?.call(
-          '$logLabel -> ${connectedDevices[endpointId] ?? endpointId}',
-        );
-      } catch (e) {
-        onLog?.call('$logLabel nije poslat ka $endpointId: $e');
-      }
-    }
+    final submissions = await Future.wait(
+      endpointIds.map((endpointId) async {
+        try {
+          await _submitBytes(endpointId, payload);
+          onLog?.call(
+            '$logLabel -> ${connectedDevices[endpointId] ?? endpointId}',
+          );
+          return endpointId;
+        } catch (e) {
+          onLog?.call('$logLabel nije predat ka $endpointId: $e');
+          return null;
+        }
+      }),
+    );
 
     return MeshSendResult(
       messageId: message.messageId,
       attemptedCount: endpointIds.length,
-      deliveredCount: deliveredCount,
+      submittedEndpointIds: List.unmodifiable(submissions.whereType<String>()),
     );
   }
 
@@ -122,7 +139,9 @@ class NearbyService extends ChangeNotifier {
       return;
     }
 
-    if (connectedDevices.containsKey(endpointId) ||
+    if (_disposed ||
+        _stopping != null ||
+        connectedDevices.containsKey(endpointId) ||
         !_connecting.add(endpointId)) {
       return;
     }
@@ -165,7 +184,7 @@ class NearbyService extends ChangeNotifier {
     _processedMessages.markIfNew(hello.messageId);
 
     try {
-      await Nearby().sendBytesPayload(
+      await _submitBytes(
         endpointId,
         Uint8List.fromList(utf8.encode(hello.encode())),
       );
@@ -187,13 +206,19 @@ class NearbyService extends ChangeNotifier {
     return deviceRole;
   }
 
-  Future<void> loadOrCreateDeviceId() async {
+  Future<void> loadOrCreateDeviceId() => _identityLoad ??= _loadIdentity()
+      .whenComplete(() => _identityLoad = null);
+
+  Future<void> _loadIdentity() async {
     final prefs = await SharedPreferences.getInstance();
     deviceId = prefs.getString('mesh_device_id') ?? '';
 
     if (deviceId.isEmpty) {
       deviceId = uuid.v4();
-      await prefs.setString('mesh_device_id', deviceId);
+      if (!await prefs.setString('mesh_device_id', deviceId)) {
+        deviceId = '';
+        throw StateError('Identitet uređaja nije sačuvan.');
+      }
       onLog?.call('Novi Device ID kreiran');
     } else {
       onLog?.call('Device ID učitan');
@@ -203,12 +228,6 @@ class NearbyService extends ChangeNotifier {
       knownDevices[deviceId] = deviceName;
       knownDeviceRoles[deviceId] = deviceRole;
     }
-  }
-
-  Future<bool> hasInternetConnection() async {
-    final connectivityResult = await Connectivity().checkConnectivity();
-
-    return !connectivityResult.contains(ConnectivityResult.none);
   }
 
   Future<void> setDeviceName(String name) async {
@@ -256,14 +275,19 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> startAdvertising() async {
+    if (_disposed || _stopping != null || advertising || _startingAdvertising) {
+      return;
+    }
     if (deviceName.isEmpty) {
       onLog?.call('Prvo unesi ime uređaja.');
       return;
     }
 
-    await requestPermissions();
-
+    final session = _session;
+    _startingAdvertising = true;
     try {
+      await requestPermissions();
+      if (_disposed || session != _session) return;
       final result = await Nearby().startAdvertising(
         deviceName,
         strategy,
@@ -273,6 +297,10 @@ class NearbyService extends ChangeNotifier {
         onDisconnected: _onDisconnected,
       );
 
+      if (_disposed || session != _session) {
+        if (result) await Nearby().stopAdvertising();
+        return;
+      }
       advertising = result;
       _devicesChanged();
       onLog?.call(
@@ -280,30 +308,42 @@ class NearbyService extends ChangeNotifier {
       );
     } catch (e) {
       onLog?.call('Greška advertising: $e');
+    } finally {
+      _startingAdvertising = false;
     }
   }
 
   Future<void> startDiscovery() async {
+    if (_disposed || _stopping != null || discovering || _startingDiscovery) {
+      return;
+    }
     if (deviceName.isEmpty) {
       onLog?.call('Prvo unesi ime uređaja.');
       return;
     }
 
-    await requestPermissions();
-
+    final session = _session;
+    _startingDiscovery = true;
     try {
+      await requestPermissions();
+      if (_disposed || session != _session) return;
       final result = await Nearby().startDiscovery(
         deviceName,
         strategy,
         serviceId: serviceId,
         onEndpointFound: (String id, String name, String serviceId) {
+          if (_disposed ||
+              session != _session ||
+              connectedDevices.containsKey(id)) {
+            return;
+          }
           foundDevices[id] = name;
           onLog?.call('Pronađen uređaj: $name');
           _devicesChanged();
           unawaited(connectToDevice(id));
         },
         onEndpointLost: (String? id) {
-          if (id != null) {
+          if (!_disposed && session == _session && id != null) {
             foundDevices.remove(id);
             onLog?.call('Uređaj izgubljen: $id');
             _devicesChanged();
@@ -311,30 +351,48 @@ class NearbyService extends ChangeNotifier {
         },
       );
 
+      if (_disposed || session != _session) {
+        if (result) await Nearby().stopDiscovery();
+        return;
+      }
       discovering = result;
       _devicesChanged();
       onLog?.call(result ? 'Discovery pokrenut' : 'Discovery nije pokrenut');
     } catch (e) {
       onLog?.call('Greška discovery: $e');
+    } finally {
+      _startingDiscovery = false;
     }
   }
 
-  void _onConnectionInitiated(String id, ConnectionInfo info) {
+  Future<void> _onConnectionInitiated(String id, ConnectionInfo info) async {
+    if (_disposed || _stopping != null) return;
+    _connecting.add(id);
     foundDevices[id] = info.endpointName;
     onLog?.call('Konekcija zatražena od: ${info.endpointName}');
 
-    Nearby().acceptConnection(
-      id,
-      onPayLoadRecieved: (endpointId, payload) {
-        if (payload.type == PayloadType.BYTES && payload.bytes != null) {
-          _handleIncomingPayload(endpointId, payload.bytes!);
-        }
-      },
-      onPayloadTransferUpdate: (endpointId, update) {},
-    );
+    try {
+      await Nearby().acceptConnection(
+        id,
+        onPayLoadRecieved: (endpointId, payload) {
+          if (payload.type == PayloadType.BYTES && payload.bytes != null) {
+            _handleIncomingPayload(endpointId, payload.bytes!);
+          }
+        },
+        onPayloadTransferUpdate: (endpointId, update) {},
+      );
+    } catch (e) {
+      _connecting.remove(id);
+      onLog?.call('Konekcija nije prihvaćena: $e');
+    }
   }
 
   void _handleIncomingPayload(String endpointId, Uint8List bytes) {
+    if (_disposed ||
+        _stopping != null ||
+        !connectedDevices.containsKey(endpointId)) {
+      return;
+    }
     onLog?.call('PAYLOAD primljen od $endpointId | bytes: ${bytes.length}');
 
     if (bytes.length > _maxIncomingBytes) {
@@ -347,6 +405,15 @@ class NearbyService extends ChangeNotifier {
     try {
       rawData = utf8.decode(bytes, allowMalformed: false);
       final meshMessage = MeshMessage.decode(rawData);
+
+      final endpointIdentity = endpointDeviceIds[endpointId];
+      if (meshMessage.senderId == deviceId ||
+          (meshMessage.hopCount == 0 &&
+              endpointIdentity != null &&
+              endpointIdentity != meshMessage.senderId)) {
+        onLog?.call('Odbačena poruka sa neusklađenim identitetom uređaja.');
+        return;
+      }
 
       if (!_processedMessages.markIfNew(meshMessage.messageId)) {
         onLog?.call('Dupla poruka ignorisana: ${meshMessage.messageId}');
@@ -389,7 +456,9 @@ class NearbyService extends ChangeNotifier {
         _devicesChanged();
       }
 
-      _events.add(meshMessage);
+      final isPrivateMessage = meshMessage.type == 'private';
+      final isForMe = !isPrivateMessage || meshMessage.receiverId == deviceId;
+      if (isForMe) _events.add(meshMessage);
 
       if (meshMessage.type == 'hello') {
         onLog?.call(
@@ -431,20 +500,17 @@ class NearbyService extends ChangeNotifier {
       }
 
       final isGroupMessage = meshMessage.type == 'group';
-      final isPrivateMessage = meshMessage.type == 'private';
       final isSosMessage = meshMessage.type == 'sos';
       final isSosResponse =
           meshMessage.type == 'sos_accept' ||
           meshMessage.type == 'sos_reject' ||
           meshMessage.type == 'sos_cancel';
 
-      final isForMe =
-          isGroupMessage ||
-          isSosMessage ||
-          isSosResponse ||
-          (isPrivateMessage && meshMessage.receiverId == deviceId);
-
-      if (isForMe) {
+      if (isForMe &&
+          (isGroupMessage ||
+              isSosMessage ||
+              isSosResponse ||
+              isPrivateMessage)) {
         onLog?.call('Primljena mesh poruka: ${meshMessage.messageId}');
         onMessageReceived?.call(meshMessage, endpointId);
       } else {
@@ -453,11 +519,14 @@ class NearbyService extends ChangeNotifier {
         );
       }
 
-      _relayMessage(meshMessage, endpointId);
+      if (!isPrivateMessage || !isForMe) {
+        _relayMessage(meshMessage, endpointId);
+      }
     } catch (e) {
       if (rawData != null &&
           rawData.trim().isNotEmpty &&
-          !rawData.trimLeft().startsWith('{')) {
+          !rawData.trimLeft().startsWith('{') &&
+          !rawData.trimLeft().startsWith('[')) {
         final legacyMessage = MeshMessage(
           messageId: uuid.v4(),
           senderId: endpointDeviceIds[endpointId] ?? endpointId,
@@ -474,6 +543,7 @@ class NearbyService extends ChangeNotifier {
         );
 
         onLog?.call('Primljena kompatibilna stara/string poruka.');
+        _events.add(legacyMessage);
         onMessageReceived?.call(legacyMessage, endpointId);
         return;
       }
@@ -499,14 +569,19 @@ class NearbyService extends ChangeNotifier {
       hopCount: originalMessage.hopCount + 1,
     );
 
-    await _sendToConnectedPeers(
-      relayedMessage,
-      excludeEndpointId: receivedFromEndpointId,
-      logLabel: 'Relay ${relayedMessage.hopCount}/${relayedMessage.maxHops}',
-    );
+    try {
+      await _sendToConnectedPeers(
+        relayedMessage,
+        excludeEndpointId: receivedFromEndpointId,
+        logLabel: 'Relay ${relayedMessage.hopCount}/${relayedMessage.maxHops}',
+      );
+    } catch (e) {
+      onLog?.call('Relay nije predat: $e');
+    }
   }
 
   void _onConnectionResult(String id, Status status) {
+    if (_disposed || _stopping != null) return;
     _connecting.remove(id);
     onLog?.call('Rezultat konekcije $id: $status');
 
@@ -517,11 +592,12 @@ class NearbyService extends ChangeNotifier {
       foundDevices.remove(id);
 
       _devicesChanged();
-      sendHello(id);
+      unawaited(sendHello(id));
     }
   }
 
   void _onDisconnected(String id) {
+    if (_disposed || _stopping != null) return;
     _connecting.remove(id);
     connectedDevices.remove(id);
     endpointDeviceIds.remove(id);
@@ -579,7 +655,7 @@ class NearbyService extends ChangeNotifier {
       logLabel: 'SOS odgovor $responseType',
     );
 
-    return result.delivered ? result : null;
+    return result.submitted ? result : null;
   }
 
   Future<MeshSendResult?> sendSosMessage({
@@ -631,13 +707,13 @@ class NearbyService extends ChangeNotifier {
     _processedMessages.markIfNew(meshMessage.messageId);
     final result = await _sendToConnectedPeers(meshMessage, logLabel: 'SOS');
 
-    if (!result.delivered) {
-      onLog?.call('SOS nije isporučen nijednom direktnom uređaju.');
+    if (!result.submitted) {
+      onLog?.call('SOS nije predat nijednoj direktnoj vezi.');
       return null;
     }
 
     onLog?.call(
-      'SOS poslat: $sosId | ${result.deliveredCount}/${result.attemptedCount}',
+      'SOS poslat: $sosId | ${result.submittedCount}/${result.attemptedCount}',
     );
     return result;
   }
@@ -667,7 +743,7 @@ class NearbyService extends ChangeNotifier {
       senderName: deviceName,
       senderRole: deviceRole,
       receiverId: 'ALL',
-      text: 'Pomoć pružena ugroženoj osobi.',
+      text: 'Pošiljalac je završio SOS.',
       type: 'sos_cancel',
       hopCount: 0,
       maxHops: 5,
@@ -681,7 +757,7 @@ class NearbyService extends ChangeNotifier {
       logLabel: 'SOS cancel',
     );
 
-    if (!result.delivered) {
+    if (!result.submitted) {
       return null;
     }
 
@@ -828,34 +904,39 @@ class NearbyService extends ChangeNotifier {
     _onDisconnected(endpointId);
   }
 
-  Future<void> stopAll() async {
-    await Nearby().stopAdvertising();
-    await Nearby().stopDiscovery();
-    await Nearby().stopAllEndpoints();
+  Future<void> stopAll() =>
+      _stopping ??= _stopTransport().whenComplete(() => _stopping = null);
 
-    advertising = false;
-    discovering = false;
-    _connecting.clear();
-    foundDevices.clear();
-    connectedDevices.clear();
-    endpointDeviceIds.clear();
-
-    onLog?.call('Sve zaustavljeno');
-    _devicesChanged();
+  Future<void> _stopTransport() async {
+    _session++;
+    try {
+      await Future.wait([
+        if (advertising || _startingAdvertising) Nearby().stopAdvertising(),
+        if (discovering || _startingDiscovery) Nearby().stopDiscovery(),
+        if (connectedDevices.isNotEmpty || _connecting.isNotEmpty)
+          Nearby().stopAllEndpoints(),
+      ]);
+    } finally {
+      advertising = false;
+      discovering = false;
+      _connecting.clear();
+      foundDevices.clear();
+      connectedDevices.clear();
+      endpointDeviceIds.clear();
+      _devicesChanged();
+    }
   }
 
   @override
   void dispose() {
-    _events.close();
-    if (advertising) {
-      Nearby().stopAdvertising();
-    }
-    if (discovering) {
-      Nearby().stopDiscovery();
-    }
-    if (connectedDevices.isNotEmpty || _connecting.isNotEmpty) {
-      Nearby().stopAllEndpoints();
-    }
+    _disposed = true;
+    onLog = null;
+    unawaited(_events.close());
+    unawaited(
+      stopAll().catchError((Object error) {
+        debugPrint('Nearby shutdown failed: $error');
+      }),
+    );
     super.dispose();
   }
 }

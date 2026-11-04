@@ -107,7 +107,7 @@ class PlannerEngine {
     number(rf, 'gainDbi', min: -20, max: 40);
     number(rf, 'lossDb', min: 0, max: 100);
     number(rf, 'requiredMarginDb', min: 0, max: 60);
-    final pairIds = <String>{};
+    final pairIds = <(String, String)>{};
     for (final p in objects(s['profiles'])) {
       final from = text(p, 'from');
       final to = text(p, 'to');
@@ -115,7 +115,7 @@ class PlannerEngine {
       if (!ids.contains(from) ||
           !ids.contains(to) ||
           from == to ||
-          !pairIds.add(pair.join('|'))) {
+          !pairIds.add((pair[0], pair[1]))) {
         throw const FormatException('Neispravan ili dupli par profila.');
       }
       text(p, 'source');
@@ -272,7 +272,7 @@ class PlannerEngine {
     final queue = <List<String>>[
       [nodes.first['id'] as String],
     ];
-    final visited = <String>{'${nodes.first['id']}:0'};
+    final visited = <(String, int)>{(nodes.first['id'] as String, 0)};
     for (var i = 0; i < queue.length; i++) {
       final path = queue[i];
       if (path.last == target) return path.map((id) => byId[id]!).toList();
@@ -287,7 +287,7 @@ class PlannerEngine {
         final stations = candidate
             .where((id) => byId[id]!['kind'] == 'station')
             .length;
-        if (stations > limit || !visited.add('$next:$stations')) continue;
+        if (stations > limit || !visited.add((next, stations))) continue;
         queue.add(candidate);
       }
     }
@@ -328,50 +328,48 @@ class PlannerEngine {
       'reason': 'Nema izvodljivog kandidata sa unesenim podacima.',
     };
     // Ascending AGL gives the lowest model-feasible height among supplied sites.
-    for (
-      double agl = number(drone, 'minAglM');
-      agl <= number(drone, 'maxAglM');
-      agl += number(drone, 'stepM')
-    ) {
-      if (drone['conditionsConfirmed'] != true ||
-          usableMinutes < number(drone, 'requiredMinutes')) {
-        break;
-      }
-      for (final site in objects(
-        s['airSites'],
-      ).where((n) => n['accessible'] == true)) {
-        final airborne = {...site, 'antennaM': agl, 'kind': 'air'};
-        final airLinks = [
-          ...links,
-          for (final node in nodes) link(node, airborne, radio, profiles),
-        ];
-        final airPath = _path(
-          [hq, ...stations, airborne, incident],
-          airLinks,
-          (s['stationLimit'] as num).toInt(),
-          incident['id'],
-        );
-        if (airPath != null && airPath.any((n) => n['kind'] == 'air')) {
-          airPlan = {
-            'status': 'estimated',
-            'site': airborne,
-            'aglM': agl,
-            'amslM': number(site, 'elevationM') + agl,
-            'availableMinutes': usableMinutes,
-            'path': airPath,
-            'reason':
-                'Najniža ispitana AGL visina među unesenim kandidatima; nije nalog za let.',
-          };
-          break;
+    final minAgl = number(drone, 'minAglM');
+    final maxAgl = number(drone, 'maxAglM');
+    final stepAgl = number(drone, 'stepM');
+    final candidates = objects(s['airSites'])
+        .where((site) => site['accessible'] == true);
+    if (path == null &&
+        drone['conditionsConfirmed'] == true &&
+        usableMinutes >= number(drone, 'requiredMinutes')) {
+      for (var i = 0; i <= 100; i++) {
+        final agl = math.min(minAgl + i * stepAgl, maxAgl);
+        for (final site in candidates) {
+          final airborne = {...site, 'antennaM': agl, 'kind': 'air'};
+          final airLinks = [
+            ...links,
+            for (final node in nodes) link(node, airborne, radio, profiles),
+          ];
+          final airPath = _path(
+            [hq, ...stations, airborne, incident],
+            airLinks,
+            (s['stationLimit'] as num).toInt(),
+            incident['id'],
+          );
+          if (airPath != null && airPath.any((n) => n['kind'] == 'air')) {
+            airPlan = {
+              'status': 'estimated',
+              'site': airborne,
+              'aglM': agl,
+              'amslM': number(site, 'elevationM') + agl,
+              'availableMinutes': usableMinutes,
+              'path': airPath,
+              'reason': 'Najniža ispitana AGL visina među unesenim kandidatima; nije nalog za let.',
+            };
+            break;
+          }
         }
+        if (airPlan['status'] == 'estimated' || agl == maxAgl) break;
       }
-      if (airPlan['status'] == 'estimated') break;
     }
     if (path != null) {
       airPlan = {
         'status': 'notRequired',
-        'reason':
-            'Zemaljska putanja prolazi model; vazdušni relej nije potreban za ovu vezu.',
+        'reason': 'Zemaljska putanja prolazi model; vazdušni relej nije potreban za ovu vezu.',
       };
     }
     if (path == null && drone['conditionsConfirmed'] != true) {
@@ -450,9 +448,8 @@ class PlannerEngine {
         for (var j = 0; j < available.length; j++) {
           final team = available[j];
           if (mask & (1 << j) != 0 ||
-              !_strings(
-                task['requires'],
-              ).every(_strings(team['skills']).contains)) {
+              !_strings(task['requires'])
+                  .every(_strings(team['skills']).contains)) {
             continue;
           }
           final tail = solve(i + 1, mask | (1 << j));

@@ -92,24 +92,30 @@ class MeshMessage {
     return value is String ? value : fallback;
   }
 
-  static int _asInt(dynamic value, {required int fallback}) {
-    return value is num ? value.toInt() : fallback;
+  static int? _optionalInt(Object? value, String field) {
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is double &&
+        value.isFinite &&
+        value == value.truncateToDouble() &&
+        value.abs() <= 8640000000000000) {
+      return value.toInt();
+    }
+    throw FormatException('Neispravna vrijednost polja $field.');
   }
 
-  static double? _asDoubleOrNull(dynamic value) {
-    return value is num ? value.toDouble() : null;
-  }
-
-  static int? _asIntOrNull(dynamic value) {
-    return value is num ? value.toInt() : null;
+  static double? _optionalCoordinate(Object? value) {
+    if (value == null) return null;
+    if (value is num) return value.toDouble();
+    throw const FormatException('Neispravne GPS koordinate.');
   }
 
   factory MeshMessage.fromJson(Map<String, dynamic> json) {
     final messageId = _asString(json['messageId']).trim();
     final senderId = _asString(json['senderId']).trim();
     final type = _asString(json['type'], fallback: 'group').trim();
-    final hopCount = _asInt(json['hopCount'], fallback: 0);
-    final maxHops = _asInt(json['maxHops'], fallback: 5);
+    final hopCount = _optionalInt(json['hopCount'], 'hopCount') ?? 0;
+    final maxHops = _optionalInt(json['maxHops'], 'maxHops') ?? 5;
 
     if (messageId.isEmpty) {
       throw const FormatException('Mesh poruka nema messageId.');
@@ -127,35 +133,49 @@ class MeshMessage {
       throw const FormatException('Neispravna hop vrijednost mesh poruke.');
     }
 
-    final lat = _asDoubleOrNull(json['latitude']);
-    final lng = _asDoubleOrNull(json['longitude']);
+    final lat = _optionalCoordinate(json['latitude']);
+    final lng = _optionalCoordinate(json['longitude']);
     if ((lat == null) != (lng == null) ||
         (lat != null && (!lat.isFinite || lat.abs() > 90)) ||
         (lng != null && (!lng.isFinite || lng.abs() > 180))) {
       throw const FormatException('Neispravne GPS koordinate.');
     }
-    final battery = _asIntOrNull(json['batteryLevel']);
+    final battery = _optionalInt(json['batteryLevel'], 'batteryLevel');
     if (battery != null && (battery < 0 || battery > 100)) {
       throw const FormatException('Neispravna baterija.');
+    }
+    final receiverId = _asString(json['receiverId'], fallback: 'ALL').trim();
+    if (type == 'private' && (receiverId.isEmpty || receiverId == 'ALL')) {
+      throw const FormatException('Privatna mesh poruka nema primaoca.');
+    }
+    final timestamp =
+        _optionalInt(json['timestamp'], 'timestamp') ??
+        DateTime.now().millisecondsSinceEpoch;
+    if (timestamp < 0 || timestamp > 8640000000000000) {
+      throw const FormatException('Neispravno vrijeme mesh poruke.');
+    }
+    final sosId = _asString(json['sosId']).trim();
+    if ((type == 'sos_accept' ||
+            type == 'sos_reject' ||
+            type == 'sos_cancel') &&
+        sosId.isEmpty) {
+      throw const FormatException('SOS poruka nema ID incidenta.');
     }
     return MeshMessage(
       messageId: messageId,
       senderId: senderId,
       senderName: _asString(json['senderName']),
       senderRole: _asString(json['senderRole'], fallback: 'Volonter'),
-      receiverId: _asString(json['receiverId'], fallback: 'ALL'),
+      receiverId: receiverId,
       text: _asString(json['text']),
       type: type,
       hopCount: hopCount,
       maxHops: maxHops,
-      timestamp: _asInt(
-        json['timestamp'],
-        fallback: DateTime.now().millisecondsSinceEpoch,
-      ),
-      latitude: _asDoubleOrNull(json['latitude']),
-      longitude: _asDoubleOrNull(json['longitude']),
-      batteryLevel: _asIntOrNull(json['batteryLevel']),
-      sosId: json['sosId'] is String ? json['sosId'] as String : null,
+      timestamp: timestamp,
+      latitude: lat,
+      longitude: lng,
+      batteryLevel: battery,
+      sosId: sosId.isEmpty ? null : sosId,
       sosReason: json['sosReason'] is String
           ? json['sosReason'] as String
           : null,

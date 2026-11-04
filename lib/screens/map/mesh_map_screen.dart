@@ -36,6 +36,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
   LatLng? _myLocation;
   bool _isDownloadingMap = false;
   String? _offlineAreaName;
+  String _offlineSource = OfflineMapService.defaultOfflineSource;
   String _offlineCacheSize = '0 MB';
   String? _offlineTileRootPath;
   int _offlineDownloadCurrent = 0;
@@ -445,6 +446,7 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
   Future<void> _loadOfflineAreas() async {
     final prefs = await SharedPreferences.getInstance();
     final savedList = prefs.getStringList('offline_map_areas_v2') ?? [];
+    final savedSource = prefs.getString(OfflineMapService.tileSourceKey);
 
     final loadedAreas = <Map<String, dynamic>>[];
 
@@ -466,16 +468,19 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
 
     setState(() {
       _offlineAreas = loadedAreas;
+      _offlineSource = savedSource ?? OfflineMapService.defaultOfflineSource;
     });
   }
 
   Future<void> _saveOfflineAreas() async {
     final prefs = await SharedPreferences.getInstance();
 
-    await prefs.setStringList(
+    if (!await prefs.setStringList(
       'offline_map_areas_v2',
       _offlineAreas.map((item) => jsonEncode(item)).toList(),
-    );
+    )) {
+      throw StateError('Offline područja nisu sačuvana na uređaju.');
+    }
   }
 
   Future<void> _deleteOfflineArea(Map<String, dynamic> area) async {
@@ -614,27 +619,42 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
 
     String areaNameDraft = defaultName;
 
-    final areaName = await showDialog<String>(
+    var sourceDraft = _offlineSource;
+    String? sourceError;
+    final selection = await showDialog<({String name, String source})>(
       context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
           backgroundColor: const Color(0xFF151A23),
           scrollable: true,
           title: const Text(
             'Preuzmi područje mape',
             style: TextStyle(color: Colors.white),
           ),
-          content: TextFormField(
-            initialValue: defaultName,
-            autofocus: true,
-            style: const TextStyle(color: Colors.white),
-            decoration: InputDecoration(
-              hintText: 'npr. Jahorina - Ogorjelica',
-              hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.45)),
-            ),
-            onChanged: (value) {
-              areaNameDraft = value;
-            },
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                initialValue: defaultName,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(labelText: 'Naziv područja'),
+                onChanged: (value) => areaNameDraft = value,
+              ),
+              TextFormField(
+                initialValue: sourceDraft,
+                keyboardType: TextInputType.url,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Izvor offline pločica (HTTPS)',
+                  hintText: 'https://mape.example/{z}/{x}/{y}.png',
+                  helperText: 'OSM raster od pružaoca koji dopušta offline preuzimanje.',
+                  helperMaxLines: 3,
+                  errorText: sourceError,
+                  errorMaxLines: 3,
+                ),
+                onChanged: (value) => sourceDraft = value,
+              ),
+            ],
           ),
           actions: [
             TextButton(
@@ -648,22 +668,28 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
                 final name = areaNameDraft.trim();
                 if (name.isEmpty) return;
 
-                Navigator.of(dialogContext).pop(name);
+                final source = sourceDraft.trim();
+                if (!OfflineMapService.validOfflineSource(source)) {
+                  update(
+                    () => sourceError = 'Unesi dozvoljeni HTTPS izvor s oznakama {z}, {x} i {y}.',
+                  );
+                  return;
+                }
+                Navigator.of(dialogContext).pop((name: name, source: source));
               },
               child: const Text('Preuzmi'),
             ),
           ],
-        );
-      },
+        ),
+      ),
     );
 
-    if (!mounted || areaName == null || areaName.isEmpty) {
-      return;
-    }
-
+    if (!mounted || selection == null || _isDownloadingMap) return;
+    final areaName = selection.name;
+    final source = selection.source;
     setState(() {
       _isDownloadingMap = true;
-      _offlineAreaName = areaName;
+      _offlineSource = source;
       _offlineDownloadCurrent = 0;
       _offlineDownloadTotal = 0;
     });
@@ -672,52 +698,72 @@ class _MeshMapScreenState extends State<MeshMapScreen> {
     final currentZoom = _safeZoom(_currentZoom).round();
     final nextZoom = (currentZoom + 1).clamp(1, 18);
 
-    final result = await _offlineMapService.downloadArea(
-      onProgress: (current, total) {
-        if (!mounted) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!await prefs.setString(OfflineMapService.tileSourceKey, source)) {
+        throw StateError('Izvor mape nije sačuvan.');
+      }
+      final result = await _offlineMapService.downloadArea(
+        source: source,
+        onProgress: (current, total) {
+          if (!mounted) return;
 
-        setState(() {
-          _offlineDownloadCurrent = current;
-          _offlineDownloadTotal = total;
-        });
-      },
-      centerLat: downloadCenter.latitude,
-      centerLng: downloadCenter.longitude,
-      zoomLevels: [currentZoom, nextZoom],
-      radius: 5,
-    );
+          setState(() {
+            _offlineDownloadCurrent = current;
+            _offlineDownloadTotal = total;
+          });
+        },
+        centerLat: downloadCenter.latitude,
+        centerLng: downloadCenter.longitude,
+        zoomLevels: [currentZoom, nextZoom],
+        radius: 5,
+      );
 
-    if (!mounted) return;
-    final offlineMap = {
-      'name': areaName,
-      'lat': downloadCenter.latitude,
-      'lng': downloadCenter.longitude,
-      'zoom': currentZoom,
-      'tileCache': true,
-      'complete': result.isComplete,
-      'downloadedTiles': result.downloaded,
-      'totalTiles': result.total,
-      'createdAt': DateTime.now().toIso8601String(),
-    };
+      if (!mounted) return;
+      if (result.downloaded == 0) {
+        throw StateError(
+          'Nijedna pločica nije dostupna. Provjeri izvor i vezu.',
+        );
+      }
+      final offlineMap = {
+        'name': areaName,
+        'lat': downloadCenter.latitude,
+        'lng': downloadCenter.longitude,
+        'zoom': currentZoom,
+        'tileCache': true,
+        'complete': result.isComplete,
+        'downloadedTiles': result.downloaded,
+        'totalTiles': result.total,
+        'createdAt': DateTime.now().toIso8601String(),
+      };
 
-    setState(() {
-      _offlineAreas.removeWhere((item) => item['name'] == areaName);
-      _offlineAreas.add(offlineMap);
-      _isDownloadingMap = false;
-    });
+      setState(() {
+        _offlineAreas.removeWhere((item) => item['name'] == areaName);
+        _offlineAreas.add(offlineMap);
+        _offlineAreaName = areaName;
+      });
 
-    await _saveOfflineAreas();
-    await _loadOfflineCacheSize();
+      await _saveOfflineAreas();
+      await _loadOfflineCacheSize();
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Preuzimanje: $areaName (${result.downloaded}/${result.total} pločica). ${result.isComplete ? 'Područje je kompletno.' : 'Područje NIJE kompletno.'}',
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Preuzimanje: $areaName (${result.downloaded}/${result.total} pločica). ${result.isComplete ? 'Područje je kompletno.' : 'Područje NIJE kompletno.'}',
+          ),
         ),
-      ),
-    );
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Preuzimanje nije završeno: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isDownloadingMap = false);
+    }
   }
 
   void _openOfflineArea(Map<String, dynamic> area) {
@@ -1057,6 +1103,9 @@ class BslOfflineTileProvider extends TileProvider {
       return FileImage(file);
     }
 
-    return NetworkImage('https://tile.openstreetmap.org/$z/$x/$y.png');
+    return NetworkImage(
+      'https://tile.openstreetmap.org/$z/$x/$y.png',
+      headers: const {'User-Agent': OfflineMapService.userAgent},
+    );
   }
 }

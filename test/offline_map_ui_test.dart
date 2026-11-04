@@ -1,10 +1,12 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mesh_messenger_test/screens/map/mesh_map_screen.dart';
+import 'package:mesh_messenger_test/services/offline_map_service.dart';
 
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
@@ -52,10 +54,33 @@ void main() {
     final file = File('${cache.path}/13/4520/2980.png');
     await file.parent.create(recursive: true);
     await file.writeAsBytes([137, 80, 78, 71]);
-    final image = BslOfflineTileProvider(cache.path).getImage(
-      TileCoordinates(4520, 2980, 13), TileLayer(),
-    );
+    final image = BslOfflineTileProvider(cache.path)
+        .getImage(TileCoordinates(4520, 2980, 13), TileLayer());
     expect(image, isA<FileImage>());
     expect((image as FileImage).file.path, file.path);
+  });
+  test('offline source excludes OSM public tiles and requires a complete HTTPS template', () {
+    expect(
+      OfflineMapService.validOfflineSource(
+        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      ),
+      isFalse,
+    );
+    expect(
+      OfflineMapService.validOfflineSource(
+        'http://maps.example/{z}/{x}/{y}.png',
+      ),
+      isFalse,
+    );
+    expect(
+      OfflineMapService.validOfflineSource('https://maps.example/{z}/{x}.png'),
+      isFalse,
+    );
+    expect(
+      OfflineMapService.validOfflineSource(
+        'https://maps.example/{z}/{x}/{y}.png',
+      ),
+      isTrue,
+    );
   });
 }

@@ -6,6 +6,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../../services/offline_map_service.dart';
+
 LatLng? meshPoint(Map<String, dynamic> data) {
   final lat = double.tryParse('${data['lat']}');
   final lng = double.tryParse('${data['lng']}');
@@ -401,13 +403,19 @@ class _CommandCenterMapPanelState extends State<CommandCenterMapPanel> {
                       : 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                   errorTileCallback: (tile, error, stackTrace) {
                     // Prefer the reference imagery, but retain offline basemap access.
-                    if (_satellite) {
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (mounted && _satellite) {
-                          setState(() => _satellite = false);
-                        }
-                      });
-                    }
+                    final wasSatellite = _satellite;
+                    final wasTerrain = _terrain;
+                    if (!wasSatellite && !wasTerrain) return;
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted &&
+                          _satellite == wasSatellite &&
+                          _terrain == wasTerrain) {
+                        setState(() {
+                          _satellite = false;
+                          _terrain = false;
+                        });
+                      }
+                    });
                   },
                   maxNativeZoom: _terrain ? 17 : 19,
                   userAgentPackageName: 'ba.noria.nrnmesh',
@@ -560,6 +568,7 @@ class CommandCenterOfflineTileProvider extends TileProvider {
         ? FileImage(file)
         : NetworkImage(
             'https://tile.openstreetmap.org/${coordinates.z.round()}/${coordinates.x.round()}/${coordinates.y.round()}.png',
+            headers: const {'User-Agent': OfflineMapService.userAgent},
           );
   }
 }

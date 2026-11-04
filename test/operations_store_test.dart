@@ -203,4 +203,83 @@ void main() {
     );
     restored.dispose();
   });
+  test(
+    'mission and member progress are applied after delayed team data',
+    () async {
+      final ops = OperationsStore(TestTransport());
+      await ops.ready;
+      ops.receive(
+        event('member', 'progress', {'id': 'm', 'status': 'Na putu'}),
+      );
+      ops.receive(
+        event('owner', 'mission', {
+          'id': 'm',
+          'teamId': 't',
+          'task': 'Pretraga',
+        }),
+      );
+      expect(ops.missions, isEmpty);
+      ops.receive(
+        event('owner', 'team', {
+          'id': 't',
+          'name': 'Tim',
+          'members': ['member'],
+        }),
+      );
+      expect(
+        (ops.missions['m']!['progress'] as Map)['member']['status'],
+        'Na putu',
+      );
+      await ops.save();
+      ops.dispose();
+    },
+  );
+
+  test(
+    'an early SOS cancel persists and only suppresses the original sender',
+    () async {
+      final transport = TestTransport();
+      final store = OperationsStore(transport);
+      await store.ready;
+      MeshMessage sos(
+        String id,
+        String sender,
+        String type, {
+        int time = 100,
+      }) => MeshMessage(
+        messageId: '$id-$sender-$type-$time',
+        senderId: sender,
+        senderName: sender,
+        receiverId: 'ALL',
+        text: '',
+        type: type,
+        hopCount: 0,
+        maxHops: 5,
+        timestamp: time,
+        sosId: id,
+      );
+      store.receive(sos('closed', 'a', 'sos_cancel'));
+      store.receive(sos('open', 'stranger', 'sos_cancel'));
+      await store.save();
+      store.dispose();
+
+      final restored = OperationsStore(transport);
+      await restored.ready;
+      restored.receive(sos('closed', 'a', 'sos'));
+      restored.receive(sos('open', 'b', 'sos_accept', time: 120));
+      restored.receive(sos('open', 'a', 'sos'));
+      restored.receive(sos('open', 'b', 'sos_reject', time: 110));
+      restored.receive(sos('open', 'stranger', 'sos', time: 130));
+      expect(restored.incidents['closed']!['status'], 'resolved');
+      expect(restored.incidents['open']!['status'], 'active');
+      expect(restored.incidents['open']!['senderId'], 'a');
+      expect(
+        (restored.incidents['open']!['responses'] as Map)['b'],
+        'sos_accept',
+      );
+      await restored.save();
+      restored.dispose();
+      transport.dispose();
+    },
+  );
 }
