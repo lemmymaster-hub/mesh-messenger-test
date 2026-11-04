@@ -40,7 +40,7 @@ jobs:
         with:
           name: NRN-UI-review
           path: test-output/
-      - run: flutter build apk --debug --flavor nrnPilot --target-platform android-arm,android-arm64,android-x64 --build-number 2026103101
+      - run: flutter build apk --debug --flavor nrnPilot --target-platform android-arm,android-arm64,android-x64
       - uses: actions/upload-artifact@v4
         with:
           name: NRN-Mesh-debug

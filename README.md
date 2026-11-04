@@ -45,3 +45,12 @@ Use three Android devices A → B → C, with A and C outside direct range. Chec
 This build has no authenticated organization membership, cryptographic command signatures or end-to-end private-message encryption across relays. Roles and sender IDs are self-reported. Nearby transport links and UI recipient filtering do not provide end-to-end authorization. Do not use the app as the only emergency communications channel. Desktop/web/iOS mesh transport is not implemented by the Android Nearby dependency.
 
 Map coverage and offline availability depend on the downloaded tiles and provider terms; a saved area label alone is not proof of complete coverage. The UI marks incomplete downloads explicitly. Removing an area entry leaves the shared tile cache intact. Public basemap services are not a production offline distribution contract; arrange an appropriate licensed/self-hosted tile source before deployment.
+
+## NRN Mesh Pilot offline maps
+
+Existing cached areas can be opened without a network connection. To download a
+new area, enter an HTTPS raster PNG tile URL with `{z}`, `{x}` and `{y}` in
+the offline map dialog. Use an OpenStreetMap-derived source that grants offline
+download rights. The public OpenStreetMap raster service is for interactive
+viewing. A default download URL can also be supplied at build time with
+`--dart-define=NRN_OFFLINE_TILE_URL=<template>`.

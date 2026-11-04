@@ -534,7 +534,8 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
               },
               child: const Text('Na mapi'),
             ),
-          if (incident['status'] != 'resolved')
+          if (incident['status'] != 'resolved' &&
+              incident['senderId'] != mesh.deviceId)
             TextButton(
               onPressed: () {
                 Navigator.pop(context);
@@ -546,9 +547,9 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
                   if (result == null) {
                     return 'Odgovor nije poslat';
                   }
-                  widget.onSosResponded(id);
                   await ops.recordSosResponse(id, 'sos_accept');
-                  return 'Prihvatanje predato vezama: ${result.deliveredCount}';
+                  if (mounted) widget.onSosResponded(id);
+                  return 'Prihvatanje predato vezama: ${result.submittedCount}';
                 });
               },
               child: const Text('Prihvati SOS'),
@@ -1135,7 +1136,7 @@ class _CommandCenterScreenState extends State<CommandCenterScreen> {
       return 'Upiši poruku';
     }
     final result = await ops.communicate(text, _recipient);
-    if (!result.startsWith('Nije')) {
+    if (mounted && !result.startsWith('Nije') && _message.text.trim() == text) {
       _message.clear();
     }
     return result;

@@ -4,8 +4,6 @@ import 'package:geolocator/geolocator.dart';
 
 import 'dart:async';
 
-import 'package:shared_preferences/shared_preferences.dart';
-
 import '../models/chat_message.dart';
 import '../modules/command_center/services/operations_store.dart';
 import '../services/nearby_service.dart';
@@ -45,7 +43,6 @@ class _ChatScreenState extends State<ChatScreen>
   final AudioPlayer _sosAudioPlayer = AudioPlayer();
   final List<ChatMessage> _messages = [];
   final List<String> _logs = [];
-  final List<ChatMessage> _privateMessages = [];
   final Map<String, Map<String, dynamic>> meshUserLocations = {};
   final Map<String, Map<String, dynamic>> meshSosLocations = {};
   bool showNameEditor = false;
@@ -63,21 +60,21 @@ class _ChatScreenState extends State<ChatScreen>
 
   String? selectedPrivateDeviceId;
   String? selectedPrivateDeviceName;
-  String? selectedPrivateEndpointId;
   bool showSosModal = false;
   bool sosActive = false;
   bool incomingSosActive = false;
   bool sosAlarmActive = false;
-  bool internetAvailable = false;
+  bool _changingSos = false;
+  bool _respondingToSos = false;
+  Position? _latestPosition;
+  int _alarmGeneration = 0;
+  Future<void> _alarmAudio = Future.value();
   Timer? sosAlarmRepeatTimer;
   Timer? sosAlarmStopTimer;
   Timer? locationBroadcastTimer;
   String incomingSosSender = '';
-  String? incomingSosSenderId;
   String incomingSosMessage = '';
   String? incomingSosId;
-  final Set<String> _sosAcceptedBy = {};
-  final Set<String> _sosRejectedBy = {};
   bool _locationBroadcastInProgress = false;
 
   int _batteryLevel = -1;
@@ -108,12 +105,16 @@ class _ChatScreenState extends State<ChatScreen>
                 ),
                 onTap: () {
                   Navigator.pop(context);
+                  final id = nearbyService.endpointDeviceIds[endpointId];
+                  if (id == null) {
+                    _sosFeedback(
+                      'Identitet uređaja još nije poznat. Sačekaj razmjenu profila.',
+                    );
+                    return;
+                  }
                   setState(() {
-                    selectedPrivateEndpointId = endpointId;
                     selectedPrivateDeviceName = name;
-                    selectedPrivateDeviceId =
-                        nearbyService.endpointDeviceIds[endpointId];
-                    _privateMessages.clear();
+                    selectedPrivateDeviceId = id;
                   });
                 },
               ),
@@ -151,46 +152,54 @@ class _ChatScreenState extends State<ChatScreen>
     _operations = OperationsStore(nearbyService);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final savedName = await nearbyService.loadDeviceName();
-      await nearbyService.loadOrCreateDeviceId();
-      await _loadSelectedRole();
-      await _operations.ready;
-      if (!mounted) {
-        return;
-      }
-      for (final e in _operations.incidents.entries) {
-        if (e.value['status'] != 'resolved') {
-          meshSosLocations[e.key] = Map.of(e.value);
-          if (e.value['senderId'] == nearbyService.deviceId) {
-            activeSosId = e.key;
-            sosActive = true;
+      try {
+        final savedName = await nearbyService.loadDeviceName();
+        final role = await nearbyService.loadDeviceRole();
+        await nearbyService.loadOrCreateDeviceId();
+        await _operations.ready;
+        if (!mounted) return;
+
+        setState(() {
+          if (availableRoles.contains(role)) selectedRole = role;
+          for (final entry in _operations.incidents.entries) {
+            final incident = entry.value;
+            if (incident['status'] == 'resolved') continue;
+            meshSosLocations[entry.key] = Map.of(incident);
+            if (incident['senderId'] == nearbyService.deviceId &&
+                ((incident['time'] as int?) ?? 0) >=
+                    ((meshSosLocations[activeSosId]?['time'] as int?) ?? 0)) {
+              activeSosId = entry.key;
+            }
           }
-        }
+          sosActive = activeSosId != null;
+          if (sosActive) {
+            sosSentCount =
+                meshSosLocations[activeSosId]?['submittedCount'] as int? ?? 0;
+            _updateSosResponseCounts();
+            _setPinnedSosCard(
+              status: sosAcceptedCount > 0 ? 'accepted' : 'active',
+              title: sosAcceptedCount > 0
+                  ? '🚑 POMOĆ NA PUTU'
+                  : '🆘 AKTIVAN SOS',
+              message:
+                  meshSosLocations[activeSosId]?['message']?.toString() ?? '',
+              sender: nearbyService.deviceName,
+            );
+            _sosPulseController.repeat(reverse: true);
+          }
+          showNameEditor = savedName == null;
+          _addSystemMessage(
+            savedName == null
+                ? 'Otvori profil i unesi ime uređaja.'
+                : 'Uređaj: ${nearbyService.deviceName} ($selectedRole)',
+          );
+        });
+        if (_selectNextIncomingSos()) _startIncomingSosAlarm();
+        if (savedName != null) await _startMesh();
+      } catch (error) {
+        if (mounted)
+          setState(() => _addSystemMessage('Pokretanje nije uspjelo: $error'));
       }
-      internetAvailable = await nearbyService.hasInternetConnection();
-      if (!mounted) {
-        return;
-      }
-
-      if (savedName == null) {
-        _addSystemMessage('Klikni ✏️ gore desno i unesi ime uređaja.');
-        _addSystemMessage('ID: ${nearbyService.deviceId.substring(0, 8)}');
-        _addSystemMessage('Mesh chat spreman.');
-        showNameEditor = true;
-      } else {
-        _addSystemMessage(
-          'Uređaj: ${nearbyService.deviceName} ($selectedRole)',
-        );
-        _addSystemMessage('ID: ${nearbyService.deviceId.substring(0, 8)}');
-        _addSystemMessage('Mesh chat spreman.');
-
-        await nearbyService.startAdvertising();
-        await Future.delayed(const Duration(seconds: 1));
-        await nearbyService.startDiscovery();
-        _syncLocationBroadcastWithConnections();
-      }
-
-      setState(() {});
     });
 
     nearbyService.onLog = (log) {
@@ -255,157 +264,74 @@ class _ChatScreenState extends State<ChatScreen>
       final senderName = meshMessage.senderName.isEmpty
           ? fallbackSenderName
           : meshMessage.senderName;
-      var shouldStartSosAlarm = false;
-      var shouldStopSosAlarm = false;
-
+      final incidentId =
+          meshMessage.sosId ?? (type == 'sos' ? meshMessage.messageId : null);
+      final incident = _operations.incidents[incidentId];
+      var refreshAlarm = false;
       setState(() {
-        if (type == 'command') {
-          return;
-        }
-        if (type == 'sos') {
-          final sosId = meshMessage.sosId ?? meshMessage.messageId;
-          var latitude = meshMessage.latitude;
-          var longitude = meshMessage.longitude;
-
-          if (latitude == null || longitude == null) {
-            final latMatch = RegExp(r'Lokacija: ([\d\.-]+), ([\d\.-]+)')
-                .firstMatch(message);
-
-            latitude = double.tryParse(latMatch?.group(1) ?? '');
-            longitude = double.tryParse(latMatch?.group(2) ?? '');
-          }
-
-          incomingSosActive = true;
-          showSosModal = true;
-          incomingSosSender = senderName;
-          incomingSosSenderId = meshMessage.senderId;
-          incomingSosMessage = message;
-          incomingSosId = sosId;
-          shouldStartSosAlarm = true;
-
-          {
-            meshSosLocations[sosId] = {
-              'lat': latitude,
-              'lng': longitude,
-              'time': meshMessage.timestamp,
-              'message': message,
-              'sender': senderName,
-              'senderId': meshMessage.senderId,
-              'sosId': sosId,
-              'status': 'active',
-            };
-          }
-
-          _setPinnedSosCard(
-            status: 'active',
-            title: '🆘 AKTIVAN SOS',
-            message: message,
-            sender: senderName,
-          );
-          _addSosPublicLog(
-            '🆘 $senderName aktivirao SOS u ${_formatTime(DateTime.now())}',
-          );
-        } else if (type == 'sos_accept') {
-          if (activeSosId == null || meshMessage.sosId != activeSosId) {
-            _logs.insert(
-              0,
-              'Ignorisan SOS odgovor za drugi incident: ${meshMessage.sosId}',
+        switch (type) {
+          case 'sos':
+            if (incident != null &&
+                incident['status'] == 'active' &&
+                !meshSosLocations.containsKey(incidentId)) {
+              meshSosLocations[incidentId!] = Map.of(incident);
+              _addSosPublicLog('🆘 $senderName aktivirao SOS.');
+              refreshAlarm = !incomingSosActive;
+            }
+          case 'sos_cancel':
+            if (incident?['status'] == 'resolved' &&
+                meshSosLocations.remove(incidentId) != null) {
+              _addSosPublicLog('✅ $senderName završio SOS.');
+              if (incomingSosId == incidentId) {
+                refreshAlarm = true;
+              }
+            }
+          case 'sos_accept':
+          case 'sos_reject':
+            if (activeSosId != null &&
+                activeSosId == incidentId &&
+                (incident?['responseTimes'] as Map?)?[meshMessage.senderId] ==
+                    meshMessage.timestamp) {
+              _updateSosResponseCounts();
+              if (sosAcceptedCount > 0) {
+                _setPinnedSosCard(
+                  status: 'accepted',
+                  title: '🚑 POMOĆ NA PUTU',
+                  message: '$sosAcceptedCount odgovor(a) o prihvatanju SOS-a.',
+                  sender: nearbyService.deviceName,
+                );
+              } else {
+                _setPinnedSosCard(
+                  status: 'active',
+                  title: '🆘 AKTIVAN SOS',
+                  message: 'Čeka se prihvatanje SOS-a.',
+                  sender: nearbyService.deviceName,
+                );
+              }
+              _addSosPublicLog(message);
+            }
+          case 'private':
+            if (selectedPrivateDeviceId != meshMessage.senderId) {
+              _addSystemMessage('Nova direktna poruka od $senderName.');
+            }
+          case 'group':
+            _messages.add(
+              ChatMessage(
+                text: message,
+                isMe: false,
+                time: DateTime.now(),
+                senderName: senderName,
+              ),
             );
-          } else {
-            _sosRejectedBy.remove(meshMessage.senderId);
-            _sosAcceptedBy.add(meshMessage.senderId);
-            _updateSosResponseCounts();
-            _setPinnedSosCard(
-              status: 'accepted',
-              title: '🚑 POMOĆ NA PUTU',
-              message: '$senderName prihvatio SOS.',
-              sender: senderName,
-            );
-            _addSosPublicLog(
-              '✅ $senderName prihvatio SOS u ${_formatTime(DateTime.now())}',
-            );
-          }
-        } else if (type == 'sos_cancel') {
-          final cancelId = meshMessage.sosId;
-          if (cancelId != null &&
-              meshSosLocations[cancelId]?['senderId'] == meshMessage.senderId) {
-            meshSosLocations.remove(cancelId);
-          }
-          final matchesIncomingIncident =
-              incomingSosId != null &&
-              meshMessage.sosId == incomingSosId &&
-              meshMessage.senderId == incomingSosSenderId;
-
-          if (!matchesIncomingIncident) {
-            _logs.insert(
-              0,
-              'Ignorisan SOS cancel za drugi incident ili pošiljaoca.',
-            );
-          } else {
-            shouldStopSosAlarm = true;
-            meshSosLocations.remove(incomingSosId);
-            incomingSosActive = false;
-            showSosModal = false;
-            sosAlarmActive = false;
-            incomingSosId = null;
-            incomingSosSenderId = null;
-            _setPinnedSosCard(
-              status: 'finished',
-              title: '✅ SOS ZAVRŠEN',
-              message: message,
-              sender: senderName,
-            );
-            _addSosPublicLog(
-              '✅ SOS ZAVRŠEN\n$message u ${_formatTime(DateTime.now())}',
-            );
-          }
-        } else if (type == 'sos_reject') {
-          if (activeSosId == null || meshMessage.sosId != activeSosId) {
-            _logs.insert(
-              0,
-              'Ignorisan SOS odgovor za drugi incident: ${meshMessage.sosId}',
-            );
-          } else {
-            _sosAcceptedBy.remove(meshMessage.senderId);
-            _sosRejectedBy.add(meshMessage.senderId);
-            _updateSosResponseCounts();
-            _addSosPublicLog('❌ $message u ${_formatTime(DateTime.now())}');
-          }
-        } else if (type == 'private') {
-          _privateMessages.add(
-            ChatMessage(
-              text: message,
-              isMe: false,
-              time: DateTime.now(),
-              senderName: senderName,
-            ),
-          );
-
-          selectedPrivateEndpointId = meshMessage.hopCount == 0
-              ? endpointId
-              : null;
-          selectedPrivateDeviceName = senderName;
-          selectedPrivateDeviceId = meshMessage.senderId;
-        } else {
-          _messages.add(
-            ChatMessage(
-              text: message,
-              isMe: false,
-              time: DateTime.now(),
-              senderName: senderName,
-            ),
-          );
         }
       });
-
-      if (shouldStartSosAlarm) {
-        _startIncomingSosAlarm();
+      if (refreshAlarm) {
+        if (_selectNextIncomingSos()) {
+          _startIncomingSosAlarm();
+        } else if (!incomingSosActive) {
+          _stopIncomingSosAlarm();
+        }
       }
-
-      if (shouldStopSosAlarm) {
-        _stopIncomingSosAlarm();
-      }
-
       _changed();
       _scrollToBottom();
     };
@@ -472,325 +398,266 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _updateSosResponseCounts() {
-    sosAcceptedCount = _sosAcceptedBy.length;
-    sosRejectedCount = _sosRejectedBy.length;
-    final responseCount = {..._sosAcceptedBy, ..._sosRejectedBy}.length;
-    final remainingDirectResponses = sosSentCount - responseCount;
-    sosPendingCount = remainingDirectResponses > 0
-        ? remainingDirectResponses
-        : 0;
+    final incident = _operations.incidents[activeSosId];
+    final responses = incident?['responses'] as Map? ?? {};
+    sosAcceptedCount = responses.values
+        .where((value) => value == 'sos_accept')
+        .length;
+    sosRejectedCount = responses.values
+        .where((value) => value == 'sos_reject')
+        .length;
+    final directPeers = incident?['submittedPeerIds'] as List? ?? [];
+    sosPendingCount = directPeers
+        .where((id) => !responses.containsKey(id))
+        .length;
   }
 
-  Future<void> _startIncomingSosAlarm() async {
-    sosAlarmRepeatTimer?.cancel();
-    sosAlarmStopTimer?.cancel();
+  bool _selectNextIncomingSos() {
+    final current = _operations.incidents[incomingSosId];
+    bool needsResponse(Map<String, dynamic>? incident) =>
+        incident != null &&
+        incident['status'] == 'active' &&
+        incident['senderId'] != nearbyService.deviceId &&
+        (incident['responses'] as Map?)?[nearbyService.deviceId] == null;
+    if (incomingSosActive && needsResponse(current)) return false;
 
-    await _playIncomingSosAlarmCycle(isRepeat: false);
-
-    if (!mounted || !incomingSosActive) {
-      return;
-    }
-
-    sosAlarmRepeatTimer = Timer.periodic(const Duration(minutes: 3), (timer) {
-      if (!mounted || !incomingSosActive) {
-        timer.cancel();
-        return;
-      }
-
-      unawaited(_playIncomingSosAlarmCycle(isRepeat: true));
-    });
-  }
-
-  Future<void> _playIncomingSosAlarmCycle({required bool isRepeat}) async {
-    if (!mounted || !incomingSosActive) {
-      return;
-    }
-
-    sosAlarmStopTimer?.cancel();
-
-    setState(() {
-      sosAlarmActive = true;
-    });
-
-    _sosPulseController.repeat(reverse: true);
-    await _sosAudioPlayer.stop();
-    if (!mounted || !incomingSosActive) {
-      return;
-    }
-
-    await _sosAudioPlayer.setReleaseMode(ReleaseMode.loop);
-    if (!mounted || !incomingSosActive) {
-      return;
-    }
-
-    await _sosAudioPlayer.play(AssetSource('sounds/sos_siren.mp3'));
-    if (!mounted || !incomingSosActive) {
-      await _sosAudioPlayer.stop();
-      return;
-    }
-
-    await HapticFeedback.heavyImpact();
-    _addSosPublicLog(
-      isRepeat
-          ? '🚨 SOS alarm ponovljen - korisnik još nije reagovao'
-          : '🚨 SOS alarm aktiviran - čeka se reakcija korisnika',
-    );
-
-    sosAlarmStopTimer = Timer(const Duration(seconds: 30), () async {
-      await _sosAudioPlayer.stop();
-      if (!mounted) {
-        return;
-      }
-
+    for (final entry in _operations.incidents.entries) {
+      if (!needsResponse(entry.value)) continue;
       setState(() {
-        sosAlarmActive = false;
+        incomingSosId = entry.key;
+        incomingSosSender =
+            entry.value['sender']?.toString() ?? 'Nepoznat uređaj';
+        incomingSosMessage = entry.value['message']?.toString() ?? '';
+        incomingSosActive = true;
+        showSosModal = true;
       });
-      _sosPulseController.stop();
-      _sosPulseController.reset();
+      return true;
+    }
+    setState(() {
+      incomingSosId = null;
+      incomingSosActive = false;
+      showSosModal = false;
     });
+    return false;
+  }
+
+  void _advanceIncomingSos(String id) {
+    if (!mounted || incomingSosId != id) return;
+    if (_selectNextIncomingSos()) {
+      _startIncomingSosAlarm();
+    } else if (!incomingSosActive) {
+      _stopIncomingSosAlarm();
+    }
+  }
+
+  void _startIncomingSosAlarm() {
+    sosAlarmRepeatTimer?.cancel();
+    _playIncomingSosAlarmCycle();
+    sosAlarmRepeatTimer = Timer.periodic(
+      const Duration(minutes: 3),
+      (_) => _playIncomingSosAlarmCycle(),
+    );
+  }
+
+  void _queueAlarmAudio(Future<void> Function() action) {
+    _alarmAudio = _alarmAudio.then((_) => action()).catchError((Object error) {
+      if (mounted) _sosFeedback('Zvuk SOS alarma nije dostupan: $error');
+    });
+  }
+
+  void _playIncomingSosAlarmCycle() {
+    if (!mounted || !incomingSosActive) return;
+    final generation = ++_alarmGeneration;
+    sosAlarmStopTimer?.cancel();
+    setState(() => sosAlarmActive = true);
+    _sosPulseController.repeat(reverse: true);
+    _queueAlarmAudio(() async {
+      if (!mounted || generation != _alarmGeneration) return;
+      await _sosAudioPlayer.stop();
+      await _sosAudioPlayer.setReleaseMode(ReleaseMode.loop);
+      if (!mounted || generation != _alarmGeneration) return;
+      await _sosAudioPlayer.play(AssetSource('sounds/sos_siren.mp3'));
+    });
+    unawaited(HapticFeedback.heavyImpact().catchError((Object _) {}));
+    sosAlarmStopTimer = Timer(const Duration(seconds: 30), _silenceIncomingSos);
+  }
+
+  void _silenceIncomingSos() {
+    _alarmGeneration++;
+    sosAlarmStopTimer?.cancel();
+    if (mounted) {
+      setState(() => sosAlarmActive = false);
+      if (!sosActive) {
+        _sosPulseController.stop();
+        _sosPulseController.reset();
+      }
+    }
+    _queueAlarmAudio(_sosAudioPlayer.stop);
   }
 
   void _stopIncomingSosAlarm() {
     sosAlarmRepeatTimer?.cancel();
-    sosAlarmStopTimer?.cancel();
-
-    sosAlarmRepeatTimer = null;
-    sosAlarmStopTimer = null;
-
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      sosAlarmActive = false;
-    });
-    _sosPulseController.stop();
-    _sosPulseController.reset();
-    unawaited(_sosAudioPlayer.stop());
+    _silenceIncomingSos();
   }
 
-  Future<void> _loadSelectedRole() async {
-    final prefs = await SharedPreferences.getInstance();
-    final savedRole = prefs.getString('mesh_device_role');
-
-    if (savedRole != null && availableRoles.contains(savedRole)) {
-      selectedRole = savedRole;
-    }
-
-    try {
-      (nearbyService as dynamic).deviceRole = selectedRole;
-    } catch (_) {}
-  }
-
-  Future<void> _saveSelectedRole(String role) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('mesh_device_role', role);
-
-    try {
-      final dynamic service = nearbyService;
-      await service.setDeviceRole(role);
-    } catch (_) {
-      try {
-        (nearbyService as dynamic).deviceRole = role;
-      } catch (_) {}
-    }
+  Future<void> _startMesh() async {
+    if (!mounted) return;
+    await nearbyService.startAdvertising();
+    if (mounted) await nearbyService.startDiscovery();
   }
 
   Future<void> _saveDeviceName() async {
     final name = _nameController.text.trim();
-    if (name.isEmpty) {
-      return;
+    if (name.isEmpty) return;
+
+    try {
+      await nearbyService.setDeviceProfile(name: name, role: selectedRole);
+      await nearbyService.loadOrCreateDeviceId();
+      if (!mounted) return;
+      setState(() {
+        showNameEditor = false;
+        _addSystemMessage('Ime uređaja: $name | Uloga: $selectedRole');
+      });
+      await _startMesh();
+    } catch (error) {
+      if (mounted) _sosFeedback('Profil nije sačuvan: $error');
     }
+  }
 
-    await nearbyService.setDeviceName(name);
-    await _saveSelectedRole(selectedRole);
+  void _sosFeedback(String text) {
+    if (!mounted) return;
+    setState(() => _addSystemMessage(text));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
 
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      showNameEditor = false;
-      _addSystemMessage(
-        'Ime uređaja: ${nearbyService.deviceName} | Uloga: $selectedRole',
+  Future<Position?> _sosPosition() async {
+    bool recent(Position? position) =>
+        position != null &&
+        DateTime.now().difference(position.timestamp).abs() <=
+            const Duration(minutes: 2);
+    try {
+      final permission = await Geolocator.checkPermission();
+      if (permission != LocationPermission.whileInUse &&
+          permission != LocationPermission.always)
+        return null;
+      if (recent(_latestPosition)) return _latestPosition;
+      final cached = await Geolocator.getLastKnownPosition().timeout(
+        const Duration(seconds: 1),
+        onTimeout: () => null,
       );
-      _addSystemMessage('Uloga: ${nearbyService.deviceRole}');
-      _addSystemMessage('ID: ${nearbyService.deviceId.substring(0, 8)}');
-    });
+      if (recent(cached)) return cached;
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 3),
+        ),
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _activateSos() async {
+    if (_changingSos || sosActive) return;
+    if (nearbyService.connectedDevices.isEmpty) {
+      _sosFeedback('SOS nije poslat. Nema direktno povezanih mesh uređaja.');
+      return;
+    }
+    _changingSos = true;
     try {
-      if (nearbyService.connectedDevices.isEmpty) {
-        setState(() {
-          _addSystemMessage(
-            'SOS NIJE POSLAT: nema direktno povezanih mesh uređaja.',
-          );
-        });
-        return;
-      }
-
-      var permission = await Geolocator.checkPermission();
-      String? locationWarning;
-      Position? position;
-
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
-        locationWarning = 'GPS nije dostupan. SOS će biti poslat bez lokacije.';
-      } else {
-        try {
-          position = await Geolocator.getCurrentPosition(
-            locationSettings: const LocationSettings(
-              accuracy: LocationAccuracy.high,
-              timeLimit: Duration(seconds: 15),
-            ),
-          ).timeout(const Duration(seconds: 12));
-        } catch (_) {
-          try {
-            position = await Geolocator.getLastKnownPosition();
-          } catch (_) {
-            position = null;
-          }
-
-          if (position == null) {
-            locationWarning =
-                'GPS lokacija nije pronađena. SOS će biti poslat bez lokacije.';
-          } else {
-            locationWarning =
-                'Korištena je posljednja poznata lokacija za SOS.';
-          }
-        }
-      }
-
-      final sosPosition = position;
-      final resolvedLocationWarning = locationWarning;
-
-      final sendResult = await nearbyService.sendSosMessage(
-        latitude: sosPosition?.latitude,
-        longitude: sosPosition?.longitude,
+      final position = await _sosPosition();
+      if (!mounted) return;
+      final directIds = Map.of(nearbyService.endpointDeviceIds);
+      final result = await nearbyService.sendSosMessage(
+        latitude: position?.latitude,
+        longitude: position?.longitude,
       );
-
-      if (!mounted) {
+      if (!mounted) return;
+      if (result == null) {
+        _sosFeedback(
+          'SOS nije predat mesh vezi. Provjeri veze i pokušaj ponovo.',
+        );
         return;
       }
 
-      if (sendResult == null) {
-        setState(() {
-          if (resolvedLocationWarning != null) {
-            _addSystemMessage(resolvedLocationWarning);
-          }
-          _addSystemMessage(
-            'SOS NIJE ISPORUČEN. Provjeri mesh vezu i pokušaj ponovo.',
-          );
-        });
-        return;
-      }
-
+      final location = position == null
+          ? 'Lokacija nije dostupna'
+          : 'Lokacija: ${position.latitude}, ${position.longitude}';
       setState(() {
-        if (resolvedLocationWarning != null) {
-          _addSystemMessage(resolvedLocationWarning);
-        }
         sosActive = true;
-        sosSentCount = sendResult.deliveredCount;
-        sosAcceptedCount = 0;
-        sosRejectedCount = 0;
-        sosPendingCount = sendResult.deliveredCount;
-        activeSosId = sendResult.messageId;
-        _sosAcceptedBy.clear();
-        _sosRejectedBy.clear();
-        {
-          meshSosLocations[sendResult.messageId] = {
-            'lat': sosPosition?.latitude,
-            'lng': sosPosition?.longitude,
-            'time': DateTime.now().millisecondsSinceEpoch,
-            'message': 'Lokalno aktiviran SOS',
-            'sender': nearbyService.deviceName,
-            'senderId': nearbyService.deviceId,
-            'sosId': sendResult.messageId,
-            'status': 'active',
-          };
-        }
+        sosSentCount = result.submittedCount;
+        activeSosId = result.messageId;
+        meshSosLocations[result.messageId] = {
+          'lat': position?.latitude,
+          'lng': position?.longitude,
+          'time': DateTime.now().millisecondsSinceEpoch,
+          'message': 'Lokalno aktiviran SOS\n$location',
+          'sender': nearbyService.deviceName,
+          'senderId': nearbyService.deviceId,
+          'sosId': result.messageId,
+          'status': 'active',
+          'submittedCount': result.submittedCount,
+          'submittedPeerIds': result.submittedEndpointIds
+              .map((endpoint) => directIds[endpoint])
+              .whereType<String>()
+              .toSet()
+              .toList(),
+        };
         _changed();
-        final locationDescription = sosPosition == null
-            ? 'Lokacija nije dostupna'
-            : 'Lokacija: ${sosPosition.latitude}, ${sosPosition.longitude}';
+        _updateSosResponseCounts();
         _setPinnedSosCard(
           status: 'active',
           title: '🆘 AKTIVAN SOS',
-          message: 'SOS POSLAT\n$locationDescription',
+          message: 'Predato mesh vezi • prijem nije potvrđen\n$location',
           sender: nearbyService.deviceName,
-        );
-        _messages.insert(
-          0,
-          ChatMessage(
-            text:
-                '🆘 SOS POSLAT\n'
-                '$locationDescription\n'
-                'Vrijeme: ${DateTime.now().toLocal()}',
-            isMe: true,
-            time: DateTime.now(),
-            senderName: 'JA',
-          ),
         );
       });
       _sosPulseController.repeat(reverse: true);
-      await HapticFeedback.heavyImpact();
-    } catch (e) {
-      _addSystemMessage('Greška pri slanju SOS: $e');
-      setState(() {});
+      _sosFeedback('SOS predat mesh vezi • prijem nije potvrđen. $location');
+    } catch (error) {
+      _sosFeedback('Slanje SOS-a nije završeno: $error');
+    } finally {
+      _changingSos = false;
     }
   }
 
   Future<void> _cancelSos() async {
-    if (activeSosId == null) {
-      return;
-    }
-
-    final sosId = activeSosId!;
-    final sendResult = await nearbyService.sendSosCancel(sosId: sosId);
-
-    if (!mounted) {
-      return;
-    }
-
-    if (sendResult == null) {
+    final id = activeSosId;
+    if (id == null || _changingSos) return;
+    _changingSos = true;
+    try {
+      final result = await nearbyService.sendSosCancel(sosId: id);
+      if (!mounted) return;
+      if (result == null) {
+        _sosFeedback('Završetak SOS-a nije predat. SOS ostaje aktivan.');
+        return;
+      }
+      await _operations.resolveLocal(id);
+      if (!mounted) return;
       setState(() {
-        _addSystemMessage(
-          'SOS CANCEL NIJE POSLAT. SOS ostaje aktivan; pokušaj ponovo kada se mesh veza uspostavi.',
+        sosActive = false;
+        activeSosId = null;
+        meshSosLocations.remove(id);
+        sosSentCount = 0;
+        _updateSosResponseCounts();
+        _setPinnedSosCard(
+          status: 'finished',
+          title: '✅ SOS ZAVRŠEN',
+          message: 'Završetak predat mesh vezi • prijem nije potvrđen.',
+          sender: nearbyService.deviceName,
         );
       });
-      return;
-    }
-
-    if (!incomingSosActive) {
-      _sosPulseController.stop();
-      _sosPulseController.reset();
-    }
-
-    setState(() {
-      sosActive = false;
-      if (!incomingSosActive) {
-        sosAlarmActive = false;
+      if (!sosAlarmActive) {
+        _sosPulseController.stop();
+        _sosPulseController.reset();
       }
-      activeSosId = null;
-      meshSosLocations.remove(sosId);
-      unawaited(_operations.resolveLocal(sosId));
       _changed();
-      _sosAcceptedBy.clear();
-      _sosRejectedBy.clear();
-
-      sosSentCount = 0;
-      sosAcceptedCount = 0;
-      sosRejectedCount = 0;
-      sosPendingCount = 0;
-      _addSosPublicLog(
-        '✅ SOS ZAVRŠEN\nPomoć pružena ugroženoj osobi. ${_formatTime(DateTime.now())}',
-      );
-    });
+      _sosFeedback('Završetak SOS-a predat mesh vezi • prijem nije potvrđen.');
+    } catch (error) {
+      _sosFeedback('Završetak SOS-a nije uspio: $error');
+    } finally {
+      _changingSos = false;
+    }
   }
 
   bool _sendingChat = false;
@@ -825,7 +692,7 @@ class _ChatScreenState extends State<ChatScreen>
       if (!mounted) {
         return;
       }
-      if (result == null || !result.delivered) {
+      if (result == null || !result.submitted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Poruka nije poslata. Provjeri mesh veze.'),
@@ -834,24 +701,26 @@ class _ChatScreenState extends State<ChatScreen>
         return;
       }
       setState(() {
-        (privateMode ? _privateMessages : _messages).add(
-          ChatMessage(
-            text: text,
-            isMe: true,
-            time: DateTime.now(),
-            senderName: 'Ja',
-          ),
-        );
+        if (!privateMode)
+          _messages.add(
+            ChatMessage(
+              text: text,
+              isMe: true,
+              time: DateTime.now(),
+              senderName: 'Ja',
+            ),
+          );
         _logs.insert(
           0,
-          'Poruka predata direktnim vezama: ${result.deliveredCount}/${result.attemptedCount}; prijem nije potvrđen.',
+          'Poruka predata direktnim vezama: ${result.submittedCount}/${result.attemptedCount}; prijem nije potvrđen.',
         );
       });
       await _operations.recordOutgoing(text, privateMode ? receiverId : null);
       if (!mounted) {
         return;
       }
-      _controller.clear();
+      if (_controller.text.trim() == text) _controller.clear();
+      setState(() {});
       _scrollToBottom();
     } catch (e) {
       if (mounted) {
@@ -913,6 +782,7 @@ class _ChatScreenState extends State<ChatScreen>
         ),
       );
 
+      _latestPosition = position;
       await _loadBatteryLevel();
 
       await nearbyService.sendLocationUpdate(
@@ -1067,61 +937,39 @@ class _ChatScreenState extends State<ChatScreen>
     required String responseType,
     String reason = '',
   }) async {
-    final sosId = incomingSosId;
-    if (sosId == null) {
-      return false;
-    }
-
-    final result = await nearbyService.sendSosResponse(
-      sosId: sosId,
-      responseType: responseType,
-      reason: reason,
-    );
-
-    if (!mounted) {
-      return false;
-    }
-
-    if (result == null) {
-      setState(() {
-        _addSystemMessage(
-          'SOS odgovor NIJE POSLAT. Reaguj ponovo kada se mesh veza uspostavi.',
-        );
-      });
-      return false;
-    }
-
-    await _operations.recordSosResponse(sosId, responseType);
-    if (!mounted || incomingSosId != sosId) {
-      return false;
-    }
-
-    _stopIncomingSosAlarm();
-
-    setState(() {
-      showSosModal = false;
-      incomingSosActive = false;
-      final action = responseType == 'sos_accept'
-          ? 'prihvatio SOS'
-          : 'odbio SOS${reason.isNotEmpty ? ' - $reason' : ''}';
-      _messages.add(
-        ChatMessage(
-          text:
-              '${nearbyService.deviceName} $action ${_formatTime(DateTime.now())}',
-          isMe: true,
-          time: DateTime.now(),
-          senderName: 'SOS odgovor',
-        ),
+    final id = incomingSosId;
+    if (id == null || _respondingToSos) return false;
+    _respondingToSos = true;
+    try {
+      final result = await nearbyService.sendSosResponse(
+        sosId: id,
+        responseType: responseType,
+        reason: reason,
       );
-    });
+      if (!mounted) return false;
+      if (result == null) {
+        _sosFeedback(
+          'SOS odgovor nije predat. Provjeri mesh veze i pokušaj ponovo.',
+        );
+        return false;
+      }
 
-    return true;
+      await _operations.recordSosResponse(id, responseType);
+      if (!mounted) return false;
+      _advanceIncomingSos(id);
+      _sosFeedback('SOS odgovor predat mesh vezi • prijem nije potvrđen.');
+      return true;
+    } catch (error) {
+      _sosFeedback('SOS odgovor nije predat: $error');
+      return false;
+    } finally {
+      _respondingToSos = false;
+    }
   }
 
   Future<void> _showRejectSosDialog() async {
-    if (incomingSosId == null) {
-      return;
-    }
+    final id = incomingSosId;
+    if (id == null) return;
 
     String selectedReason = 'Nisam u mogućnosti da pomognem';
     String customReason = '';
@@ -1225,6 +1073,7 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
+    if (incomingSosId != id) return;
     await _respondToIncomingSos(responseType: 'sos_reject', reason: result);
   }
 
@@ -1550,17 +1399,13 @@ class _ChatScreenState extends State<ChatScreen>
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: internetAvailable
-                  ? Colors.blue.withValues(alpha: 0.15)
-                  : Colors.orange.withValues(alpha: 0.15),
+              color: Colors.orange.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Text(
-              internetAvailable ? '🌐 LAN/MOBILE' : '📡 MESH',
+            child: const Text(
+              '📡 MESH',
               style: TextStyle(
-                color: internetAvailable
-                    ? Colors.lightBlueAccent
-                    : Colors.orangeAccent,
+                color: Colors.orangeAccent,
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
               ),
@@ -1632,10 +1477,8 @@ class _ChatScreenState extends State<ChatScreen>
                       icon: Icons.smartphone,
                       onTap: () {
                         setState(() {
-                          selectedPrivateEndpointId = null;
                           selectedPrivateDeviceId = entry.key;
                           selectedPrivateDeviceName = entry.value;
-                          _privateMessages.clear();
                         });
                       },
                     ),
@@ -1781,6 +1624,10 @@ class _ChatScreenState extends State<ChatScreen>
       return const SizedBox.shrink();
     }
 
+    final id = selectedPrivateDeviceId;
+    final messages = id == null
+        ? const <Map<String, dynamic>>[]
+        : _operations.conversation(id);
     return Container(
       height: fill
           ? null
@@ -1812,8 +1659,6 @@ class _ChatScreenState extends State<ChatScreen>
                     setState(() {
                       selectedPrivateDeviceName = null;
                       selectedPrivateDeviceId = null;
-                      selectedPrivateEndpointId = null;
-                      _privateMessages.clear();
                     });
                   },
                 ),
@@ -1823,12 +1668,13 @@ class _ChatScreenState extends State<ChatScreen>
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.all(8),
-              itemCount: _privateMessages.length,
+              itemCount: messages.length,
               itemBuilder: (context, index) {
-                final msg = _privateMessages[index];
+                final message = messages[index];
+                final isMe = message['senderId'] == nearbyService.deviceId;
 
                 return Align(
-                  alignment: msg.isMe
+                  alignment: isMe
                       ? Alignment.centerRight
                       : Alignment.centerLeft,
                   child: Container(
@@ -1838,13 +1684,13 @@ class _ChatScreenState extends State<ChatScreen>
                       maxWidth: MediaQuery.of(context).size.width * 0.72,
                     ),
                     decoration: BoxDecoration(
-                      color: msg.isMe
+                      color: isMe
                           ? const Color(0xFF1D4ED8)
                           : const Color(0xFF1F2937),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
-                      msg.text,
+                      message['text']?.toString() ?? '',
                       style: const TextStyle(color: Colors.white, fontSize: 14),
                     ),
                   ),
@@ -1919,7 +1765,8 @@ class _ChatScreenState extends State<ChatScreen>
     _nameController.dispose();
     _scrollController.dispose();
     _sosPulseController.dispose();
-    unawaited(_sosAudioPlayer.dispose());
+    _alarmGeneration++;
+    _queueAlarmAudio(_sosAudioPlayer.dispose);
     _operations.dispose();
     _meshLive.dispose();
     nearbyService.dispose();
@@ -1934,34 +1781,27 @@ class _ChatScreenState extends State<ChatScreen>
     ]);
     if (!mounted) { return; }
     try {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => CommandCenterScreen(
-          meshUserLocations: meshUserLocations,
-          meshSosLocations: meshSosLocations,
-          batteryLevel: () => _batteryLevel,
-          transport: nearbyService,
-          operations: _operations,
-          live: _meshLive,
-          onSosResponded: (id) {
-            if (incomingSosId == id) {
-              _stopIncomingSosAlarm();
-              setState(() {
-                incomingSosActive = false;
-                showSosModal = false;
-              });
-            }
-          },
-          onSos: _activateSos,
-          onCancelSos: _cancelSos,
-          onOfflineMaps: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => MeshMapScreen(
-                meshUserLocations: meshUserLocations,
-                meshSosLocations: meshSosLocations,
-                live: _meshLive,
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CommandCenterScreen(
+            meshUserLocations: meshUserLocations,
+            meshSosLocations: meshSosLocations,
+            batteryLevel: () => _batteryLevel,
+            transport: nearbyService,
+            operations: _operations,
+            live: _meshLive,
+            onSosResponded: _advanceIncomingSos,
+            onSos: _activateSos,
+            onCancelSos: _cancelSos,
+            onOfflineMaps: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => MeshMapScreen(
+                  meshUserLocations: meshUserLocations,
+                  meshSosLocations: meshSosLocations,
+                  live: _meshLive,
+                ),
               ),
             ),
           ),
@@ -2094,8 +1934,7 @@ class _ChatScreenState extends State<ChatScreen>
         await _editPhoneProfile();
       }
       if (value == 'connect') {
-        await nearbyService.startAdvertising();
-        await nearbyService.startDiscovery();
+        await _startMesh();
       }
       if (value == 'map' && mounted) {
         Navigator.push(
@@ -2209,11 +2048,7 @@ class _ChatScreenState extends State<ChatScreen>
             ),
             IconButton(
               tooltip: 'Auto connect',
-              onPressed: () async {
-                await nearbyService.startAdvertising();
-                await Future.delayed(const Duration(seconds: 1));
-                await nearbyService.startDiscovery();
-              },
+              onPressed: _startMesh,
               icon: const Icon(Icons.hub, color: Colors.white),
             ),
 

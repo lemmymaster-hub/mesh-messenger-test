@@ -34,7 +34,9 @@ class _OfflinePlannerScreenState extends State<OfflinePlannerScreen> {
   String _reportStatus = 'ok';
   String? _error;
   bool _loading = true;
-  bool _saving = false;
+  int _pendingWrites = 0;
+  bool get _saving => _pendingWrites > 0;
+  Future<void> _writes = Future.value();
   bool _planning = false;
   int _tab = 0;
   Timer? _clock;
@@ -55,17 +57,24 @@ class _OfflinePlannerScreenState extends State<OfflinePlannerScreen> {
       final state = await _store.load();
       if (!mounted) return;
       if (state != null) {
-        _editor.text = state['input'] as String;
-        _plan = state['plan'] == null
+        final input = state['input'] as String;
+        final plan = state['plan'] == null
             ? null
             : PlannerEngine.object(state['plan']);
-        _approval = state['approval'] == null
+        final approval = state['approval'] == null
             ? null
             : PlannerEngine.object(state['approval']);
-        _reports = (state['reports'] as List)
+        final reports = (state['reports'] as List? ?? [])
             .map(PlannerEngine.object)
             .toList();
-        _audit = (state['audit'] as List).map(PlannerEngine.object).toList();
+        final audit = (state['audit'] as List? ?? [])
+            .map(PlannerEngine.object)
+            .toList();
+        _editor.text = input;
+        _plan = plan;
+        _approval = approval;
+        _reports = reports;
+        _audit = audit;
       }
     } catch (_) {
       _error =
@@ -99,24 +108,25 @@ class _OfflinePlannerScreenState extends State<OfflinePlannerScreen> {
   };
 
   Future<void> _save() async {
-    if (_saving) return;
     setState(() {
-      _saving = true;
+      _pendingWrites++;
       _error = null;
     });
     try {
-      // Freeze before await so the stored approval and input always agree.
+      // Freeze each request, including changes made while a previous write is pending.
       final state = PlannerEngine.object(jsonDecode(jsonEncode(_state())));
-      await _store.save(state);
-      if (mounted) {
+      final write = _writes.then((_) => _store.save(state));
+      _writes = write.catchError((Object _) {});
+      await write;
+      if (mounted && _pendingWrites == 1) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Sačuvano lokalno na ovom uređaju.')),
         );
       }
-    } catch (e) {
-      if (mounted) setState(() => _error = 'Čuvanje nije uspjelo: $e');
+    } catch (error) {
+      if (mounted) setState(() => _error = 'Čuvanje nije uspjelo: $error');
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted) setState(() => _pendingWrites--);
     }
   }
 
@@ -141,7 +151,7 @@ class _OfflinePlannerScreenState extends State<OfflinePlannerScreen> {
           'planCreatedAt': plan['createdAt'],
         });
       });
-      _save();
+      await _save();
     } catch (e) {
       if (mounted) setState(() => _error = 'Plan nije izrađen: $e');
     } finally {
@@ -560,6 +570,7 @@ class _OfflinePlannerScreenState extends State<OfflinePlannerScreen> {
         'at': DateTime.now().toUtc().toIso8601String(),
       });
     });
+    await _save();
   }
 
   void _addReport() {

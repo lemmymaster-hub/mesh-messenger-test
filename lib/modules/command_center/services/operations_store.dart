@@ -23,6 +23,10 @@ class OperationsStore extends ChangeNotifier {
   final List<Map<String, dynamic>> photos = [];
   final List<Map<String, dynamic>> resources = [];
   final Set<String> _resolved = {};
+  final Map<String, Set<String>> _earlyCancels = {};
+  final Map<String, List<MeshMessage>> _pendingCommands = {};
+  final Map<String, List<MeshMessage>> _pendingSosResponses = {};
+  bool _canSave = true;
   final List<MeshMessage> _pending = [];
   bool _loaded = false;
   bool _disposed = false;
@@ -65,9 +69,20 @@ class OperationsStore extends ChangeNotifier {
           }
         }
         readiness = data['readiness']?.toString() ?? 'Redovna';
-        _resolved.addAll((data['resolved'] as List? ?? []).whereType<String>());
+        final resolved = data['resolved'];
+        if (resolved is List) _resolved.addAll(resolved.whereType<String>());
+        final earlyCancels = data['earlyCancels'];
+        if (earlyCancels is Map<String, dynamic>) {
+          for (final entry in earlyCancels.entries) {
+            final senders = entry.value;
+            if (senders is List) {
+              _earlyCancels[entry.key] = senders.whereType<String>().toSet();
+            }
+          }
+        }
       }
     } catch (_) {
+      _canSave = false;
       storageError = 'Sačuvani operativni podaci nisu učitani.';
     }
     _loaded = true;
@@ -80,7 +95,9 @@ class OperationsStore extends ChangeNotifier {
     }
   }
 
-  Future<void> save() {
+  Future<void> save() async {
+    await ready;
+    if (!_canSave) return;
     final snapshot = jsonEncode({
       'teams': teams,
       'missions': missions,
@@ -90,6 +107,9 @@ class OperationsStore extends ChangeNotifier {
       'resources': resources,
       'readiness': readiness,
       'resolved': _resolved.toList(),
+      'earlyCancels': _earlyCancels.map(
+        (id, senders) => MapEntry(id, senders.toList()),
+      ),
     });
     _writes = _writes.then((_) async {
       try {
@@ -120,11 +140,19 @@ class OperationsStore extends ChangeNotifier {
       final existing = incidents[e.key];
       if (existing == null) {
         incidents[e.key] = Map.of(e.value);
+        _applyPendingSosResponses(e.key);
         changed = true;
       }
     }
     if (changed) {
       unawaited(save());
+    }
+  }
+
+  void _applyPendingSosResponses(String id) {
+    for (final response
+        in _pendingSosResponses.remove(id) ?? const <MeshMessage>[]) {
+      receive(response);
     }
   }
 
@@ -139,27 +167,59 @@ class OperationsStore extends ChangeNotifier {
     try {
       if (message.type == 'sos') {
         final id = message.sosId ?? message.messageId;
-        if (!_resolved.contains(id)) {
-          incidents[id] = {
-            'sosId': id,
-            'sender': message.senderName,
-            'senderId': message.senderId,
-            'message': message.text,
-            'lat': message.latitude,
-            'lng': message.longitude,
-            'time': message.timestamp,
-            'status': 'active',
-          };
-        }
+        if (incidents.containsKey(id) || _resolved.contains(id)) return;
+        final wasCanceled =
+            _earlyCancels.remove(id)?.contains(message.senderId) ?? false;
+        if (wasCanceled) _resolved.add(id);
+        incidents[id] = {
+          'sosId': id,
+          'sender': message.senderName,
+          'senderId': message.senderId,
+          'message': message.text,
+          'lat': message.latitude,
+          'lng': message.longitude,
+          'time': message.timestamp,
+          'status': wasCanceled ? 'resolved' : 'active',
+        };
+        _applyPendingSosResponses(id);
       } else if (message.type == 'sos_cancel') {
         final id = message.sosId;
-        if (id != null && incidents[id]?['senderId'] == message.senderId) {
-          incidents[id]!['status'] = 'resolved';
+        if (id == null) return;
+        final incident = incidents[id];
+        if (incident == null) {
+          final senders = _earlyCancels.putIfAbsent(id, () => {});
+          if (senders.length < 8) senders.add(message.senderId);
+          if (_earlyCancels.length > 300) {
+            _earlyCancels.remove(_earlyCancels.keys.first);
+          }
+        } else if (incident['senderId'] == message.senderId) {
+          incident['status'] = 'resolved';
           _resolved.add(id);
+        } else {
+          return;
         }
       } else if (message.type == 'sos_accept' || message.type == 'sos_reject') {
-        final incident = incidents[message.sosId];
-        if (incident != null) {
+        final id = message.sosId;
+        if (id == null) return;
+        final incident = incidents[id];
+        if (incident == null) {
+          final pending = _pendingSosResponses.putIfAbsent(id, () => []);
+          if (pending.length >= 30) pending.removeAt(0);
+          pending.add(message);
+          if (_pendingSosResponses.length > 100) {
+            _pendingSosResponses.remove(_pendingSosResponses.keys.first);
+          }
+          return;
+        }
+        if (incident['status'] != 'resolved' &&
+            incident['senderId'] != message.senderId) {
+          final times = Map<String, dynamic>.from(
+            incident['responseTimes'] as Map? ?? {},
+          );
+          final lastResponse = times[message.senderId];
+          if (lastResponse is int && lastResponse >= message.timestamp) return;
+          times[message.senderId] = message.timestamp;
+          incident['responseTimes'] = times;
           final responses = Map<String, dynamic>.from(
             incident['responses'] as Map? ?? {},
           );
@@ -184,6 +244,32 @@ class OperationsStore extends ChangeNotifier {
         if (decoded is! Map<String, dynamic>) {
           return;
         }
+        final op = decoded['op'];
+        final body = decoded['data'];
+        if (body is! Map<String, dynamic>) return;
+        final dependency = switch (op) {
+          'mission' when !teams.containsKey(body['teamId']) => (
+            'team',
+            body['teamId'],
+          ),
+          'progress' when !missions.containsKey(body['id']) => (
+            'mission',
+            body['id'],
+          ),
+          _ => null,
+        };
+        if (dependency != null) {
+          final id = dependency.$2;
+          if (id is! String || id.isEmpty || id.length > 100) return;
+          final key = '${dependency.$1}:$id';
+          final pending = _pendingCommands.putIfAbsent(key, () => []);
+          if (pending.length >= 20) pending.removeAt(0);
+          pending.add(message);
+          if (_pendingCommands.length > 100) {
+            _pendingCommands.remove(_pendingCommands.keys.first);
+          }
+          return;
+        }
         if (!_apply(
           decoded,
           message.senderId,
@@ -191,6 +277,13 @@ class OperationsStore extends ChangeNotifier {
           message.timestamp,
         )) {
           return;
+        }
+        if (op == 'team' || op == 'mission') {
+          for (final pending
+              in _pendingCommands.remove('$op:${body['id']}') ??
+                  const <MeshMessage>[]) {
+            receive(pending);
+          }
         }
       } else {
         return;
@@ -232,10 +325,16 @@ class OperationsStore extends ChangeNotifier {
       if (color != null && (color is! int || color < 0 || color > 0xffffffff)) {
         return false;
       }
-      teams[id] = {...body, 'owner': sender};
+      final previousTime = teams[id]?['time'];
+      if (previousTime is int && previousTime > time) return false;
+      teams[id] = {...body, 'owner': sender, 'time': time};
     } else if (op == 'mission') {
       final team = teams[body['teamId']];
-      if (team == null || team['owner'] != sender || body['task'] is! String) {
+      final task = body['task'];
+      if (team == null ||
+          team['owner'] != sender ||
+          task is! String ||
+          task.trim().isEmpty) {
         return false;
       }
       if (missions[id] != null) {
@@ -328,10 +427,15 @@ class OperationsStore extends ChangeNotifier {
 
   Future<String> transmit(Map<String, dynamic> data) async {
     final result = await transport.sendCommand(data);
-    if (result == null || !result.delivered) {
-      return 'Sačuvano lokalno • nije poslato';
+    if (result == null || !result.submitted) {
+      return storageError == null
+          ? 'Sačuvano lokalno • nije poslato'
+          : 'Nije poslato • lokalno čuvanje nije uspjelo';
     }
-    return 'Predato vezama: ${result.deliveredCount}/${result.attemptedCount} • čeka odgovor primaoca';
+    final storageStatus = storageError == null
+        ? ''
+        : ' • lokalno čuvanje nije uspjelo';
+    return 'Predato vezama: ${result.submittedCount}/${result.attemptedCount} • prijem nije potvrđen$storageStatus';
   }
 
   Future<String> communicate(String text, String? receiver) async {
@@ -341,11 +445,11 @@ class OperationsStore extends ChangeNotifier {
             text: text,
             receiverDeviceId: receiver,
           );
-    if (result == null || !result.delivered) {
+    if (result == null || !result.submitted) {
       return 'Nije poslato • nema uspješne veze';
     }
     await recordOutgoing(text, receiver);
-    return 'Predato vezama: ${result.deliveredCount}/${result.attemptedCount}';
+    return 'Predato vezama: ${result.submittedCount}/${result.attemptedCount}';
   }
 
   List<Map<String, dynamic>> conversation(String? receiver) {
@@ -387,7 +491,9 @@ class OperationsStore extends ChangeNotifier {
       return;
     }
     final incident = incidents[id];
-    if (incident == null) {
+    if (incident == null ||
+        incident['status'] == 'resolved' ||
+        incident['senderId'] == transport.deviceId) {
       return;
     }
     final responses = Map<String, dynamic>.from(
@@ -401,9 +507,9 @@ class OperationsStore extends ChangeNotifier {
 
   Future<void> resolveLocal(String id) async {
     await ready;
-    if (incidents[id] != null) {
-      incidents[id]!['status'] = 'resolved';
-    }
+    final incident = incidents[id];
+    if (incident == null || incident['senderId'] != transport.deviceId) return;
+    incident['status'] = 'resolved';
     _resolved.add(id);
     await save();
   }
